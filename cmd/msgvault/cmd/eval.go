@@ -140,8 +140,6 @@ func init() {
 	evalCmd.Flags().BoolVar(&evalJSON, flagJSON, false, "Output as JSON")
 	evalCmd.Flags().StringVar(&evalRerankJev, "rerank-jev", "", "Opt in to TypeSafe Jev reranking; sends the query and bounded message text (per-candidate,batched)")
 	evalCmd.Flags().IntVar(&evalRerankTop, "rerank-top", 30, "Maximum messages to send to Jev per retrieved ranking")
-	evalCmd.Flags().IntVar(&evalRerankMaxRequests, "rerank-max-requests", 1000, "Maximum TypeSafe requests for this eval invocation")
-	evalCmd.Flags().Float64Var(&evalRerankCostStopUSD, "rerank-cost-stop-usd", 0, "Required local Jev cost stop in USD when reranking is enabled")
 	evalCmd.Flags().Float64Var(&evalRerankInputUSDPerM, "rerank-input-usd-per-million", 0, "Required Jev input price in USD per million tokens")
 	evalCmd.Flags().Float64Var(&evalRerankOutputUSDPerM, "rerank-output-usd-per-million", 0, "Required Jev output price in USD per million tokens")
 	_ = evalCmd.MarkFlagRequired("qrels")
@@ -674,8 +672,8 @@ func parseTopic(t eval.Topic, diag *runDiagnostics) (*search.Query, bool) {
 }
 
 func runEval(cmd *cobra.Command, args []string) error {
-	return runEvalWithRerankerFactory(cmd, args, func(shape, key string, budget *rerank.Budget) (evalReranker, error) {
-		return rerank.NewJev(shape, key, budget, nil)
+	return runEvalWithRerankerFactory(cmd, args, func(shape, key string) (evalReranker, error) {
+		return rerank.NewJev(shape, key)
 	})
 }
 
@@ -737,18 +735,6 @@ func runEvalWithRerankerFactory(cmd *cobra.Command, _ []string, makeReranker eva
 		return fmt.Errorf("no topics loaded from %s (%s); expected tab-separated "+
 			"\"<qid>\\t<query text>\" — spaces where tabs are expected is the usual cause",
 			evalTopics, topicsStats)
-	}
-	if len(rerankOptions.Shapes) > 0 {
-		judgedTopics := 0
-		for _, topic := range topics {
-			if qrels.HasJudgments(topic.ID) {
-				judgedTopics++
-			}
-		}
-		if err := validateJevRequestEstimate(judgedTopics, len(modes), rerankOptions.Shapes,
-			rerankOptions.Top, rerankOptions.MaxRequests); err != nil {
-			return usageErr(cmd, err)
-		}
 	}
 	// Warn on stderr so --json output stays machine-readable.
 	for _, l := range []struct {
@@ -814,13 +800,9 @@ func runEvalWithRerankerFactory(cmd *cobra.Command, _ []string, makeReranker eva
 	var rerankReport *evalRerankReport
 	if len(rerankOptions.Shapes) > 0 {
 		rerankReport = newEvalRerankReport(rerankOptions)
-		budget := &rerank.Budget{
-			MaxRequests: rerankOptions.MaxRequests, StopUSD: rerankOptions.CostStopUSD,
-			InputUSDPerM: rerankOptions.InputUSDPerM, OutputUSDPerM: rerankOptions.OutputUSDPerM,
-		}
 		rerankReport.scorers = make(map[string]evalReranker, len(rerankOptions.Shapes))
 		for _, shape := range rerankOptions.Shapes {
-			scorer, createErr := makeReranker(shape, rerankOptions.APIKey, budget)
+			scorer, createErr := makeReranker(shape, rerankOptions.APIKey)
 			if createErr != nil {
 				return createErr
 			}
