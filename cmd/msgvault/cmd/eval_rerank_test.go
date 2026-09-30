@@ -30,7 +30,6 @@ import (
 type evalRerankRecorder struct {
 	requests    map[string][]rerank.Request
 	failAt      map[string]int
-	failUsage   rerank.Usage
 	promoteText string
 }
 
@@ -50,7 +49,7 @@ func (r *recordingReranker) Rerank(ctx context.Context, request rerank.Request) 
 	request.Candidates = append([]string(nil), request.Candidates...)
 	r.recorder.requests[r.shape] = append(r.recorder.requests[r.shape], request)
 	if r.recorder.failAt[r.shape] == len(r.recorder.requests[r.shape]) {
-		return rerank.Result{Usage: r.recorder.failUsage}, errors.New("fake provider failure")
+		return rerank.Result{}, errors.New("fake provider failure")
 	}
 	scores := make([]float64, len(request.Candidates))
 	for i := range scores {
@@ -201,7 +200,7 @@ func TestEvalRerankShortlist(t *testing.T) {
 
 func TestRunEvalRerankFailureKeepsCompleteBaseline(t *testing.T) {
 	cmd, out := prepareEvalRerankRun(t, "batched,per-candidate", 3)
-	recorder := &evalRerankRecorder{failAt: map[string]int{"batched": 2}, failUsage: rerank.Usage{}}
+	recorder := &evalRerankRecorder{failAt: map[string]int{"batched": 2}}
 	err := runEvalWithRerankerFactory(cmd, nil, recorder.makeReranker)
 	require.ErrorContains(t, err, "provider request failed")
 	require.Len(t, recorder.requests["batched"], 2, "provider work stops after the failed request")
