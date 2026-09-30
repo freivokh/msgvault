@@ -30,22 +30,24 @@ func TestNewJevBuildsDocbankClient(t *testing.T) {
 	full := strings.Repeat("a", MaxCandidateBytes)
 	multibyte := strings.Repeat("界", MaxCandidateBytes/3) + "ab"
 	for _, shape := range []string{"per-candidate", "batched"} {
-		_, err := NewJev(shape, "k")
-		require.NoError(t, err, shape)
-		profile, err := jevProfile(shape)
-		require.NoError(t, err)
-		cidrs := profile.EgressPolicy.AllowedCIDRs
-		require.Len(t, cidrs, 2)
-		assert.True(t, cidrs[0].Contains(netip.MustParseAddr("104.18.24.46")))
-		assert.True(t, cidrs[1].Contains(netip.MustParseAddr("2606:4700::6812:182e")))
 		t.Run(shape+"/KeepsEvalBounds", func(t *testing.T) {
+			require := require.New(t)
+			assert := assert.New(t)
+			_, err := NewJev(shape, "k")
+			require.NoError(err)
+			profile, err := jevProfile(shape)
+			require.NoError(err)
+			cidrs := profile.EgressPolicy.AllowedCIDRs
+			require.Len(cidrs, 2)
+			assert.True(cidrs[0].Contains(netip.MustParseAddr("104.18.24.46")))
+			assert.True(cidrs[1].Contains(netip.MustParseAddr("2606:4700::6812:182e")))
 			fits := slices.Repeat([]string{full}, MaxCandidates)
 			fits[1] = multibyte
-			require.NoError(t, typesafe.CheckRequest(profile, typesafe.RerankRequest{Query: "q", Candidates: fits}))
+			require.NoError(typesafe.CheckRequest(profile, typesafe.RerankRequest{Query: "q", Candidates: fits}))
 			for _, over := range [][]string{append(fits, "x"), {full + "b"}} {
 				err := typesafe.CheckRequest(profile, typesafe.RerankRequest{Query: "q", Candidates: over})
-				require.ErrorIs(t, err, typesafe.ErrCapacityResponse)
-				assert.Equal(t, "request bounds exceeded", SafeFailure(err))
+				require.ErrorIs(err, typesafe.ErrCapacityResponse)
+				assert.Equal("request bounds exceeded", SafeFailure(err))
 			}
 		})
 	}
@@ -54,14 +56,18 @@ func TestNewJevBuildsDocbankClient(t *testing.T) {
 func TestJevRerank(t *testing.T) {
 	candidates := []string{"a longer candidate", "short", "mid text"}
 	for shape, requests := range map[string]int{"per-candidate": 3, "batched": 1} {
-		profile, err := jevProfile(shape)
-		require.NoError(t, err)
-		fake := typesafetest.New(profile, func(_, candidate string) (float64, error) { return float64(len(candidate)) / 100, nil })
-		result, err := (&Jev{scorer: fake}).Rerank(t.Context(), Request{Query: "renewal", Candidates: candidates})
-		require.NoError(t, err, shape)
-		assert.Equal(t, []float64{0.18, 0.05, 0.08}, result.Scores)
-		assert.Equal(t, requests, result.Usage.Requests)
-		assert.Equal(t, []typesafe.RerankRequest{{Query: "renewal", Candidates: candidates}}, fake.Requests())
+		t.Run(shape, func(t *testing.T) {
+			require := require.New(t)
+			assert := assert.New(t)
+			profile, err := jevProfile(shape)
+			require.NoError(err)
+			fake := typesafetest.New(profile, func(_, candidate string) (float64, error) { return float64(len(candidate)) / 100, nil })
+			result, err := (&Jev{scorer: fake}).Rerank(t.Context(), Request{Query: "renewal", Candidates: candidates})
+			require.NoError(err)
+			assert.Equal([]float64{0.18, 0.05, 0.08}, result.Scores)
+			assert.Equal(requests, result.Usage.Requests)
+			assert.Equal([]typesafe.RerankRequest{{Query: "renewal", Candidates: candidates}}, fake.Requests())
+		})
 	}
 	t.Run("MapsReceiptTokens", func(t *testing.T) {
 		receipt := typesafe.Receipt{RequestShape: typesafe.RequestShapePerCandidate, CandidateCount: 3, InputTokens: 342, OutputTokens: 20}
