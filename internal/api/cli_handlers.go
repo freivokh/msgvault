@@ -1702,6 +1702,7 @@ func cliRunCommandAllowed(args []string) bool {
 		"add-slack",
 		"add-synctech-sms-drive",
 		"add-teams",
+		"add-twilio",
 		"backfill-beeper-media",
 		"backfill-discord-media",
 		"backfill-slack-media",
@@ -1752,7 +1753,8 @@ func cliRunCommandAllowed(args []string) bool {
 		"sync-notion-meetings",
 		"sync-slack",
 		"sync-synctech-sms",
-		"sync-teams":
+		"sync-teams",
+		"sync-twilio":
 		return true
 	default:
 		return false

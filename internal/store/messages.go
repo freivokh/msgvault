@@ -5995,6 +5995,49 @@ func (s *Store) MessageBeeperAttachments(messageID int64) (map[string]Attachment
 	return s.messageProviderAttachments(messageID, "beeper:")
 }
 
+// MessageProviderAttachments returns the message's rows whose
+// source_attachment_id starts with prefix, keyed by that ID.
+func (s *Store) MessageProviderAttachments(messageID int64, prefix string) (map[string]AttachmentRef, error) {
+	return s.messageProviderAttachments(messageID, prefix)
+}
+
+// EndWaitingProviderAttachments ends a source's provider rows, keyed with
+// prefix, still waiting for bytes on messages dated before before: unavailable
+// when the provider never produced the recording, failed otherwise. It
+// returns how many rows it ended.
+func (s *Store) EndWaitingProviderAttachments(ctx context.Context, sourceID int64, prefix string, before time.Time) (int64, error) {
+	var ended int64
+	err := s.withSyncSourceWriteContext(ctx, sourceID, func(q querier) error {
+		result, err := q.Exec(s.Rebind(`
+		UPDATE attachments
+		SET attachment_state = CASE WHEN attachment_skip_reason = ? THEN ? ELSE ? END,
+		    attachment_skip_reason = CASE WHEN attachment_skip_reason = ? THEN ? ELSE ? END
+		WHERE source_attachment_id LIKE ?
+		  AND COALESCE(content_hash, '') = ''
+		  AND (COALESCE(attachment_state, '') IN ('', ?) OR attachment_state = ? AND COALESCE(attachment_skip_reason, '') <> ?)
+		  AND message_id IN (
+		    SELECT id FROM messages
+		    WHERE source_id = ? AND COALESCE(sent_at, received_at, internal_date) < ?
+		  )
+	`),
+			attachmentpolicy.SkipSourceUnavailable, attachmentpolicy.StateUnavailable, attachmentpolicy.StateFailed,
+			attachmentpolicy.SkipSourceUnavailable, attachmentpolicy.SkipSourceUnavailable, attachmentpolicy.SkipFetchFailure,
+			prefix+"%",
+			attachmentpolicy.StatePending, attachmentpolicy.StateFailed, attachmentpolicy.SkipFetchFailure,
+			sourceID, before,
+		)
+		if err != nil {
+			return err
+		}
+		ended, err = result.RowsAffected()
+		return err
+	})
+	if err != nil {
+		return 0, fmt.Errorf("end waiting provider attachments: %w", err)
+	}
+	return ended, nil
+}
+
 // ArchivedRawMessage is one archived message paired with the verbatim provider
 // payload stored for it, decompressed.
 type ArchivedRawMessage struct {
