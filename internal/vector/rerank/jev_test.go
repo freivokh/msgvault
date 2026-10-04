@@ -116,8 +116,10 @@ func (s wavedScorer) Rerank(ctx context.Context, request typesafe.RerankRequest)
 
 func TestJevPerCandidateSlowWavesFinish(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
+		require := require.New(t)
+		assert := assert.New(t)
 		profile, err := jevProfile("per-candidate")
-		require.NoError(t, err)
+		require.NoError(err)
 		fake := typesafetest.New(profile, func(string, string) (float64, error) {
 			time.Sleep(8 * time.Second)
 			return 0.5, nil
@@ -128,10 +130,10 @@ func TestJevPerCandidateSlowWavesFinish(t *testing.T) {
 		}
 		start := time.Now()
 		result, err := (&Jev{scorer: wavedScorer{profile: profile, fake: fake}}).Rerank(t.Context(), Request{Query: "renewal", Candidates: candidates})
-		require.NoError(t, err, "four waves of 8-second calls must fit the ranking deadline")
-		assert.Len(t, result.Scores, MaxCandidates)
-		assert.Equal(t, MaxCandidates, result.Usage.Requests)
-		assert.Equal(t, 32*time.Second, time.Since(start))
+		require.NoError(err, "four waves of 8-second calls must fit the ranking deadline")
+		assert.Len(result.Scores, MaxCandidates)
+		assert.Equal(MaxCandidates, result.Usage.Requests)
+		assert.Equal(32*time.Second, time.Since(start))
 	})
 }
 
