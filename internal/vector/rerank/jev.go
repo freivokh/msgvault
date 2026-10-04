@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/netip"
+	"time"
 
 	"go.kenn.io/docbank/document/providerhttp"
 	"go.kenn.io/docbank/document/typesafe"
@@ -18,6 +19,9 @@ const (
 	MaxCandidates     = 30
 	MaxCandidateBytes = 2048
 	jevSecretBinding  = "TYPESAFE_API_KEY" //nolint:gosec // env var name, not a credential
+	jevConcurrent     = 8
+	// jevCallBudget is the time one provider call gets; a ranking's deadline covers every wave of calls.
+	jevCallBudget = 10 * time.Second
 )
 
 // ErrInvalidResponse marks scores the caller cannot use.
@@ -47,6 +51,8 @@ func jevProfile(shape string) (typesafe.Profile, error) {
 	return typesafe.Profile{
 		SecretBinding: jevSecretBinding, RequestShape: requestShape,
 		MaxCandidates: MaxCandidates, MaxCandidateBytes: MaxCandidateBytes,
+		MaxConcurrentCalls: jevConcurrent,
+		RequestTimeout:     time.Duration((MaxCandidates+jevConcurrent-1)/jevConcurrent) * jevCallBudget,
 		EgressPolicy: providerhttp.EgressPolicy{
 			Scheme: "https", Host: "api.typesafe.ai", Port: 443,
 			// api.typesafe.ai resolves to both families, and Docbank rejects any answer outside these.

@@ -3113,6 +3113,7 @@ msgvault eval \
 | `--json` | `false` | Emit the report as JSON |
 | `--rerank-jev <shapes>` | disabled | Opt in to `per-candidate`, `batched`, or both Jev shapes |
 | `--rerank-top <count>` | `30` | Between 2 and 30 candidates; cannot exceed `--limit` |
+| `--rerank-max-requests <count>` | `1000` | Maximum provider requests for the whole invocation |
 | `--rerank-input-usd-per-million <amount>` | required when enabled | Input price supplied for this run |
 | `--rerank-output-usd-per-million <amount>` | required when enabled | Output price supplied for this run |
 
@@ -3134,20 +3135,24 @@ The command prepares candidate text with the same body selection and cleanup
 used for embeddings. It sends only the query and the cleaned subject/body.
 Candidate text is capped at 2048 UTF-8 bytes and query text at 4096 bytes.
 Msgvault calls TypeSafe through Docbank's `document/typesafe` client, which
-sets the request and response size limits, runs at most eight calls at once,
-and gives each ranking 30 seconds for all of its calls. A ranking's full
-elapsed time contributes to the reported latency. The `per-candidate` and
-`batched` shapes use the same retrieved messages in one invocation.
+sets the request and response size limits and runs at most eight calls at
+once. Msgvault gives each ranking 40 seconds for all of its calls, enough for
+four waves of 10-second calls at 30 candidates. A ranking's full elapsed time
+contributes to the reported latency. The `per-candidate` and `batched` shapes
+use the same retrieved messages in one invocation.
 
 Cost is the returned input and output tokens times the prices supplied on the
-command line. Msgvault has no local spend limit, so before a live study, verify
-an account or order limit that TypeSafe enforces by rejecting charges above the
-cap. A displayed balance or alert does not establish that behavior. A response
-without token usage fails that arm. The first provider failure ends reranking
-for the run. The report keeps the baseline and the token subtotals observed
-before the failure, `usage_complete=false` marks them as partial, and unknown
-cost prints `unknown` in the table and `null` in JSON. Requests and tokens
-count completed rankings only. The command returns a nonzero result.
+command line. Before opening the archive, the command refuses a run whose
+worst-case request count, judged topics times modes times requests per
+ranking, exceeds `--rerank-max-requests`. Msgvault has no local spend limit,
+so before a live study, verify an account or order limit that TypeSafe
+enforces by rejecting charges above the cap. A displayed balance or alert does
+not establish that behavior. A response without token usage fails that arm.
+The first provider failure ends reranking for the run. The report keeps the
+baseline and the token subtotals observed before the failure,
+`usage_complete=false` marks them as partial, and unknown cost prints `unknown`
+in the table and `null` in JSON. Requests and tokens count completed rankings
+only. The command returns a nonzero result.
 
 Example with placeholder prices:
 

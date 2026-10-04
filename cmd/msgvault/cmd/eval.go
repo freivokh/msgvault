@@ -140,6 +140,7 @@ func init() {
 	evalCmd.Flags().BoolVar(&evalJSON, flagJSON, false, "Output as JSON")
 	evalCmd.Flags().StringVar(&evalRerankJev, "rerank-jev", "", "Opt in to TypeSafe Jev reranking; sends the query and bounded message text (per-candidate,batched)")
 	evalCmd.Flags().IntVar(&evalRerankTop, "rerank-top", 30, "Maximum messages to send to Jev per retrieved ranking")
+	evalCmd.Flags().IntVar(&evalRerankMaxRequests, "rerank-max-requests", 1000, "Maximum TypeSafe requests for this eval invocation")
 	evalCmd.Flags().Float64Var(&evalRerankInputUSDPerM, "rerank-input-usd-per-million", 0, "Required Jev input price in USD per million tokens")
 	evalCmd.Flags().Float64Var(&evalRerankOutputUSDPerM, "rerank-output-usd-per-million", 0, "Required Jev output price in USD per million tokens")
 	_ = evalCmd.MarkFlagRequired("qrels")
@@ -735,6 +736,18 @@ func runEvalWithRerankerFactory(cmd *cobra.Command, _ []string, makeReranker eva
 		return fmt.Errorf("no topics loaded from %s (%s); expected tab-separated "+
 			"\"<qid>\\t<query text>\" — spaces where tabs are expected is the usual cause",
 			evalTopics, topicsStats)
+	}
+	if len(rerankOptions.Shapes) > 0 {
+		judgedTopics := 0
+		for _, topic := range topics {
+			if qrels.HasJudgments(topic.ID) {
+				judgedTopics++
+			}
+		}
+		if err := validateJevRequestEstimate(judgedTopics, len(modes), rerankOptions.Shapes,
+			rerankOptions.Top, rerankOptions.MaxRequests); err != nil {
+			return usageErr(cmd, err)
+		}
 	}
 	// Warn on stderr so --json output stays machine-readable.
 	for _, l := range []struct {

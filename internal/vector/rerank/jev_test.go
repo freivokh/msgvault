@@ -8,11 +8,14 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"testing/synctest"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/docbank/document/typesafe"
 	"go.kenn.io/docbank/document/typesafe/typesafetest"
+	"golang.org/x/sync/errgroup"
 )
 
 type stubScorer struct {
@@ -80,6 +83,55 @@ func TestJevRerank(t *testing.T) {
 		result, err := (&Jev{scorer: stubScorer{err: failure}}).Rerank(t.Context(), Request{})
 		require.ErrorIs(t, err, failure)
 		assert.Equal(t, Result{}, result)
+	})
+}
+
+// wavedScorer sends one candidate per fake call under the profile's deadline and concurrency, as Docbank's per-candidate client does.
+type wavedScorer struct {
+	profile typesafe.Profile
+	fake    *typesafetest.Fake
+}
+
+func (s wavedScorer) Rerank(ctx context.Context, request typesafe.RerankRequest) (typesafe.Result, error) {
+	ctx, cancel := context.WithTimeout(ctx, s.profile.RequestTimeout)
+	defer cancel()
+	scores := make([]float64, len(request.Candidates))
+	group, groupCtx := errgroup.WithContext(ctx)
+	group.SetLimit(s.profile.MaxConcurrentCalls)
+	for i, candidate := range request.Candidates {
+		group.Go(func() error {
+			result, err := s.fake.Rerank(groupCtx, typesafe.RerankRequest{Query: request.Query, Candidates: []string{candidate}})
+			if err != nil {
+				return fmt.Errorf("fake call: %w", err)
+			}
+			scores[i] = result.Scores[0]
+			return nil
+		})
+	}
+	if err := group.Wait(); err != nil {
+		return typesafe.Result{}, fmt.Errorf("waves: %w", err)
+	}
+	return typesafe.Result{Scores: scores, Receipt: typesafe.Receipt{RequestShape: typesafe.RequestShapePerCandidate, CandidateCount: len(scores)}}, nil
+}
+
+func TestJevPerCandidateSlowWavesFinish(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		profile, err := jevProfile("per-candidate")
+		require.NoError(t, err)
+		fake := typesafetest.New(profile, func(string, string) (float64, error) {
+			time.Sleep(8 * time.Second)
+			return 0.5, nil
+		})
+		candidates := make([]string, MaxCandidates)
+		for i := range candidates {
+			candidates[i] = fmt.Sprintf("candidate %d", i)
+		}
+		start := time.Now()
+		result, err := (&Jev{scorer: wavedScorer{profile: profile, fake: fake}}).Rerank(t.Context(), Request{Query: "renewal", Candidates: candidates})
+		require.NoError(t, err, "four waves of 8-second calls must fit the ranking deadline")
+		assert.Len(t, result.Scores, MaxCandidates)
+		assert.Equal(t, MaxCandidates, result.Usage.Requests)
+		assert.Equal(t, 32*time.Second, time.Since(start))
 	})
 }
 

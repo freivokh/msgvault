@@ -28,6 +28,7 @@ const typesafeRunTimeout = 30 * time.Minute
 var (
 	evalRerankJev           string
 	evalRerankTop           int
+	evalRerankMaxRequests   int
 	evalRerankInputUSDPerM  float64
 	evalRerankOutputUSDPerM float64
 )
@@ -35,6 +36,7 @@ var (
 type evalRerankOptions struct {
 	Shapes        []string
 	Top           int
+	MaxRequests   int
 	InputUSDPerM  float64
 	OutputUSDPerM float64
 	APIKey        string
@@ -64,6 +66,7 @@ type evalRerankReport struct {
 	scorers       map[string]evalReranker
 	Shapes        []string
 	Top           int
+	MaxRequests   int
 	InputUSDPerM  float64
 	OutputUSDPerM float64
 	Model         string
@@ -76,7 +79,7 @@ type evalRerankReport struct {
 
 func newEvalRerankReport(options evalRerankOptions) *evalRerankReport {
 	return &evalRerankReport{
-		Shapes: slices.Clone(options.Shapes), Top: options.Top,
+		Shapes: slices.Clone(options.Shapes), Top: options.Top, MaxRequests: options.MaxRequests,
 		InputUSDPerM: options.InputUSDPerM, OutputUSDPerM: options.OutputUSDPerM,
 		Model: rerank.JevModel, Endpoint: rerank.JevEndpoint, Preprocess: options.Preprocess,
 		Complete: true, Results: make(map[string]map[string]*evalRerankArm),
@@ -128,8 +131,8 @@ func (r *evalRerankReport) table(w io.Writer, cutoffs eval.Cutoffs) error {
 	if _, err := fmt.Fprintln(w, "\nJev reranking"); err != nil {
 		return fmt.Errorf("write rerank report: %w", err)
 	}
-	if _, err := fmt.Fprintf(w, "  shapes\t%s\n  top\t%d\n  input price\t$%.6f / million tokens\n  output price\t$%.6f / million tokens\n",
-		strings.Join(r.Shapes, ","), r.Top, r.InputUSDPerM, r.OutputUSDPerM); err != nil {
+	if _, err := fmt.Fprintf(w, "  shapes\t%s\n  top\t%d\n  request limit\t%d\n  input price\t$%.6f / million tokens\n  output price\t$%.6f / million tokens\n",
+		strings.Join(r.Shapes, ","), r.Top, r.MaxRequests, r.InputUSDPerM, r.OutputUSDPerM); err != nil {
 		return fmt.Errorf("write rerank report: %w", err)
 	}
 	_, hit10 := hitColumns(cutoffs)
@@ -255,7 +258,7 @@ func (r *evalRerankReport) json(cutoffs eval.Cutoffs) map[string]any {
 		results[mode] = byShape
 	}
 	return map[string]any{
-		"shapes": r.Shapes, "top": r.Top,
+		"shapes": r.Shapes, "top": r.Top, "max_requests": r.MaxRequests,
 		"model": r.Model, "endpoint": r.Endpoint, "preprocess": r.Preprocess,
 		"input_usd_per_million":  r.InputUSDPerM,
 		"output_usd_per_million": r.OutputUSDPerM, "complete": r.Complete,
@@ -285,7 +288,7 @@ func nullableString(value string) any {
 }
 
 func readEvalRerankOptions(cmd *cobra.Command) (evalRerankOptions, error) {
-	opts := evalRerankOptions{Top: evalRerankTop}
+	opts := evalRerankOptions{Top: evalRerankTop, MaxRequests: evalRerankMaxRequests}
 	if strings.TrimSpace(evalRerankJev) == "" {
 		return opts, nil
 	}
@@ -297,6 +300,9 @@ func readEvalRerankOptions(cmd *cobra.Command) (evalRerankOptions, error) {
 	}
 	if opts.Top > evalLimit {
 		return opts, fmt.Errorf("--rerank-top (%d) cannot exceed --limit (%d)", opts.Top, evalLimit)
+	}
+	if opts.MaxRequests <= 0 {
+		return opts, errors.New("--rerank-max-requests must be positive")
 	}
 	if cmd != nil && !cmd.Flags().Changed("rerank-input-usd-per-million") {
 		return opts, errors.New("--rerank-input-usd-per-million is required when --rerank-jev is enabled")
@@ -346,6 +352,34 @@ func readEvalRerankOptions(cmd *cobra.Command) (evalRerankOptions, error) {
 func validatePrice(name string, value float64) error {
 	if math.IsNaN(value) || math.IsInf(value, 0) || value < 0 {
 		return fmt.Errorf("%s must be a finite nonnegative number", name)
+	}
+	return nil
+}
+
+func validateJevRequestEstimate(topicCount, modeCount int, shapes []string, top, maxRequests int) error {
+	if topicCount <= 0 || modeCount <= 0 || len(shapes) == 0 {
+		return nil
+	}
+	if top <= 0 || maxRequests <= 0 {
+		return errors.New("invalid rerank request estimate inputs")
+	}
+	requestsPerTopic := 0
+	for _, shape := range shapes {
+		requests := 1
+		if shape == "per-candidate" {
+			requests = top
+		} else if shape != "batched" {
+			return fmt.Errorf("unknown Jev request shape %q", shape)
+		}
+		if modeCount > maxRequests/requests || modeCount*requests > maxRequests-requestsPerTopic {
+			return fmt.Errorf("--rerank-max-requests (%d) is below the conservative request estimate for %d judged topics across %d modes",
+				maxRequests, topicCount, modeCount)
+		}
+		requestsPerTopic += modeCount * requests
+	}
+	if requestsPerTopic > 0 && topicCount > maxRequests/requestsPerTopic {
+		return fmt.Errorf("--rerank-max-requests (%d) is below the conservative request estimate for %d judged topics across %d modes",
+			maxRequests, topicCount, modeCount)
 	}
 	return nil
 }
