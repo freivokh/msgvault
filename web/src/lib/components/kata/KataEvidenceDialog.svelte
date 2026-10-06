@@ -1,6 +1,6 @@
 <script lang="ts">
-  import { Button, Modal, SelectDropdown, TextInput } from '@kenn-io/kit-ui';
-  import { onDestroy, untrack } from 'svelte';
+  import { appShortcuts, Button, Modal, SelectDropdown, TextInput } from '@kenn-io/kit-ui';
+  import { onDestroy, onMount, untrack } from 'svelte';
   import { createKataIssue, linkKataEvidence, prepareKataEvidence } from '../../api/generated/api/api';
   import type { APIClient } from '../../api/client';
   import type { KataIssueCreateRequest, KataIssueReceipt } from '../../api/generated/models';
@@ -43,6 +43,7 @@
   const actionOptions = [{ value: 'create', label: 'Create issue' }, { value: 'link', label: 'Add to existing issue' }];
 
   $effect(() => { void prepare(start, narrowed); });
+  onMount(() => appShortcuts.pushScope('kata-evidence-dialog'));
   onDestroy(() => { generation++; controller?.abort(); });
 
   async function prepare(from: number, exact: { start: number; end: number } | undefined): Promise<void> {
