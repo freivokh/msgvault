@@ -1,7 +1,7 @@
 ---
-last_edited: "2026-10-04"
+last_edited: "2026-10-06"
 title: Meeting Transcripts
-description: Archive call recordings, AI meeting notes, and transcripts from Twilio, Granola, Plaud, Circleback, Notion, and Muesli into your searchable local archive.
+description: Archive call recordings, AI meeting notes, and transcripts from Twilio, Bland, Granola, Plaud, Circleback, Notion, and Muesli into your searchable local archive.
 ---
 
 Find meeting decisions and transcripts in the same archive as your email and
@@ -14,6 +14,7 @@ emails connect meetings to the people you already know in msgvault.
 | Source | Connection | Main coverage limit |
 |---|---|---|
 | [Twilio](#twilio) (unreleased) | Account auth token or API key | Recordings and transcripts Twilio still retains |
+| [Bland](#bland) (unreleased) | Org API key | Calls and the postcall data Bland still retains |
 | [Granola](#granola) | API key | Requires access to Granola's public API |
 | [Notion AI Meeting Notes](#notion-ai-meeting-notes) | Notion integration token | At most 50 attendee-visible meetings per discovery query |
 | [Plaud](#plaud) | Browser authorization to its hosted MCP server | Requires Cloud Sync and existing Plaud transcription |
@@ -326,6 +327,97 @@ without the phone numbers. Archived audio and text survive later deletions.
 US1, IE1 (Dublin) and AU1 (Sydney) each use their own regional credentials.
 Conversation Intelligence transcripts are read in US1 only, so an IE1 or AU1
 account archives legacy transcriptions alone.
+
+## Bland
+
+This integration is unreleased. Each Bland call becomes one meeting with
+its summary, transcript and recording, so you keep them after Bland deletes
+them. Sync only reads: it never places calls or sets up webhooks.
+
+### Connect and sync
+
+Add a [`[[bland]]` entry](../configuration.md#bland-sources) for each org API
+key, then register and sync it:
+
+```bash
+msgvault add-bland work
+msgvault sync-bland work --probe        # check access without showing calls
+msgvault sync-bland work
+msgvault sync-bland work --limit 20     # fetch at most 20 calls
+msgvault sync-bland work --full         # revisit every call
+```
+
+A `--limit` run that stops before the end of the call list prints the command
+to continue, for example `Run: msgvault sync-bland work --limit 20`. Run it
+again until the summary says the sync is complete.
+
+### What gets stored
+
+- **Summary and transcript.** The call's summary and its corrected transcript,
+  which comes from Bland's delayed postcall webhook payload. Bland produces it
+  only for calls with a configured postcall webhook (with citation
+  extraction); without one, Bland keeps only the original transcript from the
+  call record, and that's what's archived. Transferred conversations are
+  appended with their offsets. When Bland later omits text it sent before, the
+  archived text stays.
+- **Audio.** The call's MP3 or WAV recording. The default limit is 250 MiB.
+- **Call details.** The call record and the last postcall webhook payload Bland
+  retains. msgvault keeps the payload, not the webhook URL or delivery history
+  around it, since a webhook URL is often a secret. Phone numbers stay as
+  provider evidence, not proof of who spoke.
+
+### Late artifacts and coverage
+
+Bland adds summaries, corrected transcripts and recordings after a call ends.
+
+- **Relist window.** Each sync lists every call created since seven days before
+  the previous sync started, and fetches each one again. A summary, transcript
+  or recording that arrives within seven days of the call's creation reaches
+  its meeting on a later sync. Anything later needs
+  `msgvault sync-bland work --full`.
+- **Calls in progress.** A call is archived before its artifacts exist, with
+  what it has, and later syncs update it as it ends. A call scheduled to run
+  more than a week after it was created needs `--full` after it finishes.
+- **Recordings.** A recording is fetched once the call details or postcall
+  data report its URL; a call without one gets no recording. Bland deletes
+  recordings after a retention period, which the postcall data reports as
+  `recording_expiration`. Schedule syncs well inside that period: a recording
+  Bland deleted before msgvault stored it can't be recovered.
+- **Deleted calls.** A call deleted on Bland during a first sync or `--full`
+  can make that sync skip one other call. The next sync gets it if it's within
+  the seven-day window; otherwise run `--full` again.
+- **Request cost.** Each listed call costs about 2 Bland requests per sync, plus
+  the recording download until it's stored. That suits a schedule of every few
+  hours for up to a few hundred calls a day.
+
+### Failures
+
+- **Refused recording.** If Bland refuses a recording download (HTTP 400, 401,
+  403, 404 or 410) or returns something other than audio, the sync still
+  completes and the recording shows as failed.
+- **Refused details or postcall read.** An HTTP 4xx answer other than 429
+  leaves that part out, and the sync summary counts the affected calls in one
+  note per read and status, such as
+  `postcall data refused (HTTP 403) for 12 call(s)`. A call whose details are
+  refused is archived from the call list, and its postcall data is still
+  fetched. A call whose postcall read is refused is archived from its details.
+  A transcript the call already has is kept; when it has none, the stored
+  transcript is unavailable with the status `provider_refused`. `add-bland`
+  and `--probe` report a refused read instead of failing.
+- **Malformed answer.** A malformed call detail answer, including one without
+  a creation time or with a malformed transcript, leaves the call as it was
+  archived. A malformed postcall answer archives the call from its details.
+- **Call errors.** A malformed answer, or a network, rate-limit or server error
+  on a call, marks the sync failed and names the call and any malformed field.
+  Other calls still sync. Later syncs retry the call while it's within the
+  seven-day window; a call already older than that needs another `--full`.
+- **Aged-out recordings.** Once a call leaves the window, recordings still
+  waiting for audio are marked failed, or unavailable if Bland never produced
+  them. The sync summary says how many, and only `--full` tries them again.
+- **Size cap.** A recording over the size cap is skipped with a note naming it;
+  raise `max_media_mb` and run `--full` to fetch it.
+- **Local storage failure.** A failure writing to the local attachment store
+  stops the sync.
 
 ## Granola
 
