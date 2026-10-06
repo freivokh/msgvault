@@ -344,7 +344,8 @@ import (
 // 3.1.0 adds opt-in calendar event control and availability queries.
 // 3.2.0 adds counts_pending to CLI account listing for callers that opt in by
 // header while the first count refresh runs.
-const APISchemaVersion = "3.2.0"
+// 3.3.0 adds Kata issues that quote exact message and file evidence.
+const APISchemaVersion = "3.3.0"
 
 // OpenAPIDocument builds the API schema from the same Huma route registration
 // used by the daemon. It binds no socket and needs no database.
