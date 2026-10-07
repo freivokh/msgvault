@@ -177,12 +177,6 @@
     background: var(--bg-surface-hover);
   }
 
-  /* The thread anchor carries the same 2px accent inset bar as every other
-   * selected row in the app. */
-  .message-card--expanded[aria-current='true'] {
-    box-shadow: inset 2px 0 0 var(--accent-blue);
-  }
-
   .body-reveal {
     display: grid;
     grid-template-rows: 1fr;
