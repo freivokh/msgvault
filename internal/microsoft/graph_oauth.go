@@ -2,14 +2,18 @@ package microsoft
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
 
+	"go.kenn.io/msgvault/internal/msgraph"
 	"golang.org/x/oauth2"
 )
+
+const defaultGraphURL = "https://graph.microsoft.com/v1.0"
 
 // Microsoft Graph delegated permission scopes for Teams ingestion.
 const (
@@ -76,6 +80,9 @@ type GraphManager struct {
 	tokenPrefix string
 	reauthCmd   string
 
+	// graphURL is the Graph API base used to confirm the signed-in mailbox.
+	graphURL string
+
 	// Test hooks, mirrored onto the internal delegate. See Manager.
 	authorityURL    string
 	browserFlowFn   func(ctx context.Context, email string, scopes []string) (*oauth2.Token, string, error)
@@ -120,6 +127,7 @@ func newGraphManager(clientID, tenantID, redirectURI, tokensDir string, logger *
 		redirectURI: redirectURI,
 		tokensDir:   tokensDir,
 		logger:      logger,
+		graphURL:    defaultGraphURL,
 	}
 }
 
@@ -165,6 +173,10 @@ func (m *GraphManager) Authorize(ctx context.Context, email string) error {
 		return err
 	}
 	_, claims, err := d.resolveTokenEmail(ctx, email, token, nonce)
+	var mismatch *TokenMismatchError
+	if errors.As(err, &mismatch) && claims != nil && claims.Email == "" {
+		err = m.confirmMailbox(ctx, email, token.AccessToken, mismatch)
+	}
 	if err != nil {
 		return err
 	}
@@ -173,6 +185,32 @@ func (m *GraphManager) Authorize(ctx context.Context, email string) error {
 		tenantID = claims.TenantID
 	}
 	return m.saveToken(email, token, scopes, tenantID)
+}
+
+// confirmMailbox accepts a sign-in name that differs from email when the
+// signed-in user's Graph profile lists email as its mailbox or an alias.
+func (m *GraphManager) confirmMailbox(ctx context.Context, email, accessToken string, mismatch *TokenMismatchError) error {
+	client := msgraph.NewClient(m.graphURL, func(context.Context) (string, error) { return accessToken, nil }, 0)
+	var me struct {
+		Mail              string   `json:"mail"`
+		UserPrincipalName string   `json:"userPrincipalName"`
+		ProxyAddresses    []string `json:"proxyAddresses"`
+	}
+	if err := client.GetJSON(ctx, "/me?$select=mail,userPrincipalName,proxyAddresses", &me); err != nil {
+		return fmt.Errorf("confirm the signed-in mailbox for %s: %w", email, err)
+	}
+	addrs := []string{me.Mail, me.UserPrincipalName}
+	for _, proxy := range me.ProxyAddresses {
+		if len(proxy) > 5 && strings.EqualFold(proxy[:5], "smtp:") {
+			addrs = append(addrs, proxy[5:])
+		}
+	}
+	for _, addr := range addrs {
+		if strings.EqualFold(addr, email) {
+			return nil
+		}
+	}
+	return mismatch
 }
 
 // TokenSource loads the persisted Graph token and returns a function yielding a

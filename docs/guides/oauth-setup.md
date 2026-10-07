@@ -579,6 +579,8 @@ This opens your browser for Microsoft OAuth consent. After you authorize, msgvau
 - Auto-detects the correct IMAP host based on account type
 - Configures XOAUTH2 authentication automatically
 
+If you sign in to Microsoft with a name that differs from your mailbox address, such as `jdoe@company.onmicrosoft.com` for `john@company.com`, the sign-in fails with a token mismatch and saves nothing. Re-run with the sign-in name the error prints: `msgvault add-o365 john@company.com --sign-in jdoe@company.onmicrosoft.com`. Graph mail (`--graph`) and Teams check the address against your Microsoft profile, so they need no flag.
+
 On a machine without a browser, such as a server or a container, add `--headless`:
 
 ```bash
