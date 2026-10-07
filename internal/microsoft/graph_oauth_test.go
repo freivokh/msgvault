@@ -120,9 +120,9 @@ func TestGraphManager_Authorize_ConfirmsMailboxViaProfile(t *testing.T) {
 		body   string
 		saved  bool
 	}{
-		{"mail", http.StatusOK, `{"mail":"John@company.com","userPrincipalName":"jdoe@company.onmicrosoft.com"}`, true},
-		{"smtp alias", http.StatusOK, `{"mail":"j.doe@company.com","proxyAddresses":["SMTP:j.doe@company.com","smtp:john@company.com"]}`, true},
-		{"other mailbox", http.StatusOK, `{"mail":"bob@company.com","userPrincipalName":"bob@company.onmicrosoft.com","proxyAddresses":["SMTP:bob@company.com"]}`, false},
+		{"mail", http.StatusOK, `{"mail":"John@example.com","userPrincipalName":"jdoe@example.org"}`, true},
+		{"smtp alias", http.StatusOK, `{"mail":"j.doe@example.com","proxyAddresses":["SMTP:j.doe@example.com","smtp:john@example.com"]}`, true},
+		{"other mailbox", http.StatusOK, `{"mail":"bob@example.com","userPrincipalName":"bob@example.org","proxyAddresses":["SMTP:bob@example.com"]}`, false},
 		{"forbidden", http.StatusForbidden, `{"error":{"code":"Authorization_RequestDenied"}}`, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -139,9 +139,9 @@ func TestGraphManager_Authorize_ConfirmsMailboxViaProfile(t *testing.T) {
 			m.graphURL = srv.URL
 			m.verifyIDTokenFn = testVerifyFn
 			var hint string
-			m.browserFlowFn = upnBrowserFlow(t, "jdoe@company.onmicrosoft.com", &hint)
+			m.browserFlowFn = upnBrowserFlow(t, "jdoe@example.org", &hint)
 
-			err := m.Authorize(t.Context(), "john@company.com")
+			err := m.Authorize(t.Context(), "john@example.com")
 			if tc.saved {
 				require.NoError(err)
 			} else {
@@ -149,7 +149,7 @@ func TestGraphManager_Authorize_ConfirmsMailboxViaProfile(t *testing.T) {
 				var mismatch *TokenMismatchError
 				assert.ErrorAs(err, &mismatch)
 			}
-			assert.Equal(tc.saved, m.HasToken("john@company.com"), "token saved")
+			assert.Equal(tc.saved, m.HasToken("john@example.com"), "token saved")
 		})
 	}
 }
