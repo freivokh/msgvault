@@ -97,33 +97,20 @@ func TestGraphManager_Authorize_PersistsGraphToken(t *testing.T) {
 	assert.Contains(tf.Scopes, "https://graph.microsoft.com/Chat.Read", "Graph scope persisted")
 }
 
-func TestGraphManager_Authorize_Mismatch(t *testing.T) {
-	dir := t.TempDir()
-	m := NewGraphManager("test-client", "common", "", dir, slog.Default())
-	m.verifyIDTokenFn = testVerifyFn
-	m.browserFlowFn = func(_ context.Context, _ string, _ []string) (*oauth2.Token, string, error) {
-		idToken := makeIDToken(t, map[string]any{"email": "other@example.com"})
-		tok := (&oauth2.Token{AccessToken: "x", TokenType: "Bearer"}).
-			WithExtra(map[string]any{"id_token": idToken})
-		return tok, "nonce", nil
-	}
-	err := m.Authorize(t.Context(), "user@company.com")
-	require.Error(t, err, "expected mismatch error")
-	mismatch := &TokenMismatchError{}
-	assert.ErrorAs(t, err, &mismatch, "expected *TokenMismatchError")
-}
-
 func TestGraphManager_Authorize_ConfirmsMailboxViaProfile(t *testing.T) {
+	upn := map[string]any{"preferred_username": "jdoe@example.org", "tid": "org-tenant-id"}
 	for _, tc := range []struct {
 		name   string
+		claims map[string]any
 		status int
 		body   string
 		saved  bool
 	}{
-		{"mail", http.StatusOK, `{"mail":"John@example.com","userPrincipalName":"jdoe@example.org"}`, true},
-		{"smtp alias", http.StatusOK, `{"mail":"j.doe@example.com","proxyAddresses":["SMTP:j.doe@example.com","smtp:john@example.com"]}`, true},
-		{"other mailbox", http.StatusOK, `{"mail":"bob@example.com","userPrincipalName":"bob@example.org","proxyAddresses":["SMTP:bob@example.com"]}`, false},
-		{"forbidden", http.StatusForbidden, `{"error":{"code":"Authorization_RequestDenied"}}`, false},
+		{"mail", upn, http.StatusOK, `{"mail":"John@example.com","userPrincipalName":"jdoe@example.org"}`, true},
+		{"smtp alias", upn, http.StatusOK, `{"mail":"j.doe@example.com","proxyAddresses":["SMTP:j.doe@example.com","smtp:john@example.com"]}`, true},
+		{"other mailbox", upn, http.StatusOK, `{"mail":"bob@example.com","userPrincipalName":"bob@example.org","proxyAddresses":["SMTP:bob@example.com"]}`, false},
+		{"forbidden", upn, http.StatusForbidden, `{"error":{"code":"Authorization_RequestDenied"}}`, false},
+		{"email claim differs", map[string]any{"email": "other@example.com", "tid": "org-tenant-id"}, http.StatusOK, `{"mail":"john@example.com"}`, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			require := require.New(t)
@@ -138,8 +125,11 @@ func TestGraphManager_Authorize_ConfirmsMailboxViaProfile(t *testing.T) {
 			m := NewGraphMailManager("test-client", "common", "", t.TempDir(), slog.Default())
 			m.graphURL = srv.URL
 			m.verifyIDTokenFn = testVerifyFn
-			var hint string
-			m.browserFlowFn = upnBrowserFlow(t, "jdoe@example.org", &hint)
+			m.browserFlowFn = func(_ context.Context, _ string, _ []string) (*oauth2.Token, string, error) {
+				tok := (&oauth2.Token{AccessToken: "new-access", TokenType: "Bearer"}).
+					WithExtra(map[string]any{"id_token": makeIDToken(t, tc.claims)})
+				return tok, "test-nonce", nil
+			}
 
 			err := m.Authorize(t.Context(), "john@example.com")
 			if tc.saved {

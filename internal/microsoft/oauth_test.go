@@ -270,52 +270,43 @@ func TestResolveTokenEmail_Mismatch(t *testing.T) {
 	assert.True(t, ok, "expected *TokenMismatchError, got %T: %v", err, err)
 }
 
-func TestResolveTokenEmail_FallbackToUPN(t *testing.T) {
-	// Some accounts omit "email" and only have "preferred_username".
-	m := &Manager{
-		clientID:        "test-client",
-		tenantID:        "common",
-		tokensDir:       t.TempDir(),
-		logger:          slog.Default(),
-		verifyIDTokenFn: testVerifyFn,
+func TestResolveTokenEmail_UPNFallback(t *testing.T) {
+	// With no "email" claim, the UPN must match the mailbox or the sign-in name.
+	for _, tc := range []struct {
+		name, upn, signIn, mismatch string
+	}{
+		{name: "upn equals address", upn: "john@example.com"},
+		{name: "upn differs, no sign-in name", upn: "john.doe@example.org", mismatch: "john.doe@example.org"},
+		{name: "upn matches sign-in name ignoring case", upn: "JDoe@example.org", signIn: "jdoe@example.org"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			m := &Manager{clientID: "test-client", tenantID: "common", tokensDir: t.TempDir(), logger: slog.Default(), verifyIDTokenFn: testVerifyFn}
+			m.UseSignInName(tc.signIn)
+			idToken := makeIDToken(t, map[string]any{"preferred_username": tc.upn, "tid": "org-tenant-id"})
+			token := (&oauth2.Token{AccessToken: "test-token", TokenType: "Bearer"}).
+				WithExtra(map[string]any{"id_token": idToken})
+
+			actual, _, err := m.resolveTokenEmail(t.Context(), "john@example.com", token, "test-nonce")
+			if tc.mismatch != "" {
+				mismatch := &TokenMismatchError{}
+				require.ErrorAs(t, err, &mismatch)
+				assert.Equal(t, tc.mismatch, mismatch.Actual, "Actual")
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, "john@example.com", actual, "actual")
+		})
 	}
-	idToken := makeIDToken(t, map[string]any{"preferred_username": "user@example.com"})
-	token := (&oauth2.Token{AccessToken: "test-token", TokenType: "Bearer"}).
-		WithExtra(map[string]any{"id_token": idToken})
-
-	actual, _, err := m.resolveTokenEmail(t.Context(), "user@example.com", token, "test-nonce")
-	require.NoError(t, err)
-	assert.Equal(t, "user@example.com", actual, "actual")
-}
-
-func TestResolveTokenEmail_UPNDiffersFromExpected(t *testing.T) {
-	// With no "email" claim, a different UPN means someone else signed in.
-	m := &Manager{
-		clientID:        "test-client",
-		tenantID:        "common",
-		tokensDir:       t.TempDir(),
-		logger:          slog.Default(),
-		verifyIDTokenFn: testVerifyFn,
-	}
-	idToken := makeIDToken(t, map[string]any{
-		"preferred_username": "john.doe@example.org",
-		"tid":                "org-tenant-id",
-	})
-	token := (&oauth2.Token{AccessToken: "test-token", TokenType: "Bearer"}).
-		WithExtra(map[string]any{"id_token": idToken})
-
-	_, _, err := m.resolveTokenEmail(t.Context(), "john@example.com", token, "test-nonce")
-	mismatch := &TokenMismatchError{}
-	require.ErrorAs(t, err, &mismatch)
-	assert.Equal(t, "john.doe@example.org", mismatch.Actual, "Actual")
 }
 
 // upnBrowserFlow returns a token whose ID token has upn and no email claim,
-// recording the login hint it was given.
+// recording the login hint it was given when hint is non-nil.
 func upnBrowserFlow(t *testing.T, upn string, hint *string) func(context.Context, string, []string) (*oauth2.Token, string, error) {
 	t.Helper()
 	return func(_ context.Context, h string, _ []string) (*oauth2.Token, string, error) {
-		*hint = h
+		if hint != nil {
+			*hint = h
+		}
 		idToken := makeIDToken(t, map[string]any{"preferred_username": upn, "tid": "org-tenant-id"})
 		tok := (&oauth2.Token{AccessToken: "new-access", RefreshToken: "new-refresh", TokenType: "Bearer"}).
 			WithExtra(map[string]any{"id_token": idToken})
@@ -329,8 +320,7 @@ func TestAuthorize_OtherUPNKeepsExistingToken(t *testing.T) {
 	m := &Manager{clientID: "test-client", tenantID: "common", tokensDir: t.TempDir(), logger: slog.Default(), verifyIDTokenFn: testVerifyFn}
 	old := &oauth2.Token{AccessToken: "old-access", RefreshToken: "old-refresh", TokenType: "Bearer"}
 	require.NoError(m.saveToken("alice@example.com", old, scopesForEmail("alice@example.com"), "org-tenant-id"))
-	var hint string
-	m.browserFlowFn = upnBrowserFlow(t, "bob@example.com", &hint)
+	m.browserFlowFn = upnBrowserFlow(t, "bob@example.com", nil)
 
 	err := m.Authorize(t.Context(), "alice@example.com")
 	mismatch := &TokenMismatchError{}
@@ -347,7 +337,7 @@ func TestAuthorize_SignInNameAcceptsUPN(t *testing.T) {
 	m := &Manager{clientID: "test-client", tenantID: "common", tokensDir: t.TempDir(), logger: slog.Default(), verifyIDTokenFn: testVerifyFn}
 	m.UseSignInName("jdoe@example.org")
 	var hint string
-	m.browserFlowFn = upnBrowserFlow(t, "JDoe@example.org", &hint)
+	m.browserFlowFn = upnBrowserFlow(t, "jdoe@example.org", &hint)
 
 	require.NoError(m.Authorize(t.Context(), "john@example.com"))
 	assert.Equal("jdoe@example.org", hint, "login hint")
