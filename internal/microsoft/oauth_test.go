@@ -280,6 +280,8 @@ func TestResolveTokenEmail_UPNFallback(t *testing.T) {
 		{name: "upn matches sign-in name ignoring case", upn: "JDoe@example.org", signIn: "jdoe@example.org"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			assert := assert.New(t)
+			require := require.New(t)
 			m := &Manager{clientID: "test-client", tenantID: "common", tokensDir: t.TempDir(), logger: slog.Default(), verifyIDTokenFn: testVerifyFn}
 			m.UseSignInName(tc.signIn)
 			idToken := makeIDToken(t, map[string]any{"preferred_username": tc.upn, "tid": "org-tenant-id"})
@@ -289,12 +291,12 @@ func TestResolveTokenEmail_UPNFallback(t *testing.T) {
 			actual, _, err := m.resolveTokenEmail(t.Context(), "john@example.com", token, "test-nonce")
 			if tc.mismatch != "" {
 				mismatch := &TokenMismatchError{}
-				require.ErrorAs(t, err, &mismatch)
-				assert.Equal(t, tc.mismatch, mismatch.Actual, "Actual")
+				require.ErrorAs(err, &mismatch)
+				assert.Equal(tc.mismatch, mismatch.Actual, "Actual")
 				return
 			}
-			require.NoError(t, err)
-			assert.Equal(t, "john@example.com", actual, "actual")
+			require.NoError(err)
+			assert.Equal("john@example.com", actual, "actual")
 		})
 	}
 }
