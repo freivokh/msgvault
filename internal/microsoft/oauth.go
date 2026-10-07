@@ -234,8 +234,8 @@ func signInHint(email string, claims *idTokenClaims, err error) error {
 	if !errors.As(err, &mismatch) || claims.Email != "" {
 		return err
 	}
-	return fmt.Errorf("%w; the account that signed in (%s) differs from %s. Sign in as %s, or if %s is your own sign-in name for that mailbox, re-run the same command with --sign-in %s added",
-		err, mismatch.Actual, email, email, mismatch.Actual, mismatch.Actual)
+	return fmt.Errorf("%w; the account that signed in (%s) differs from %s. Sign in as %s, or if %s is your own sign-in name for that mailbox, pass it with --sign-in",
+		err, mismatch.Actual, email, email, mismatch.Actual)
 }
 
 // doBrowserFlow dispatches to browserFlowFn (test hook), the device-code flow,

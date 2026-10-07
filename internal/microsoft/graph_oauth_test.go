@@ -146,6 +146,8 @@ func TestGraphManager_Authorize_ConfirmsMailboxViaProfile(t *testing.T) {
 				require.NoError(err)
 			} else {
 				require.Error(err)
+				var mismatch *TokenMismatchError
+				assert.ErrorAs(err, &mismatch)
 			}
 			assert.Equal(tc.saved, m.HasToken("john@company.com"), "token saved")
 		})
