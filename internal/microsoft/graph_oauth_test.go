@@ -130,7 +130,7 @@ func TestGraphManager_Authorize_ConfirmsMailboxViaProfile(t *testing.T) {
 			assert := assert.New(t)
 			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				assert.Equal("/me", r.URL.Path, "path")
-				assert.Equal("Bearer graph-access", r.Header.Get("Authorization"), "bearer")
+				assert.Equal("Bearer new-access", r.Header.Get("Authorization"), "bearer")
 				w.WriteHeader(tc.status)
 				_, _ = w.Write([]byte(tc.body))
 			}))
@@ -138,12 +138,8 @@ func TestGraphManager_Authorize_ConfirmsMailboxViaProfile(t *testing.T) {
 			m := NewGraphMailManager("test-client", "common", "", t.TempDir(), slog.Default())
 			m.graphURL = srv.URL
 			m.verifyIDTokenFn = testVerifyFn
-			m.browserFlowFn = func(_ context.Context, _ string, _ []string) (*oauth2.Token, string, error) {
-				idToken := makeIDToken(t, map[string]any{"preferred_username": "jdoe@company.onmicrosoft.com", "tid": "org-tid"})
-				tok := (&oauth2.Token{AccessToken: "graph-access", TokenType: "Bearer"}).
-					WithExtra(map[string]any{"id_token": idToken})
-				return tok, "nonce", nil
-			}
+			var hint string
+			m.browserFlowFn = upnBrowserFlow(t, "jdoe@company.onmicrosoft.com", &hint)
 
 			err := m.Authorize(t.Context(), "john@company.com")
 			if tc.saved {

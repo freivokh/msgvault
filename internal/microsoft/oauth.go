@@ -227,15 +227,15 @@ func (m *Manager) Authorize(ctx context.Context, email string) error {
 	return m.saveToken(email, token, scopes, tenantID)
 }
 
-// signInHint adds the --sign-in retry command to a mismatch that came from
-// the sign-in name, since that name may legitimately differ from the mailbox.
+// signInHint explains a mismatch that came from the sign-in name, since that
+// name may legitimately differ from the mailbox.
 func signInHint(email string, claims *idTokenClaims, err error) error {
 	var mismatch *TokenMismatchError
-	if claims == nil || claims.Email != "" || !errors.As(err, &mismatch) {
+	if !errors.As(err, &mismatch) || claims.Email != "" {
 		return err
 	}
-	return fmt.Errorf("%w; if %s is your sign-in name for %s, run 'msgvault add-o365 %s --sign-in %s'",
-		err, mismatch.Actual, email, email, mismatch.Actual)
+	return fmt.Errorf("%w; the account that signed in (%s) differs from %s. Sign in as %s, or if %s is your own sign-in name for that mailbox, re-run the same command with --sign-in %s added",
+		err, mismatch.Actual, email, email, mismatch.Actual, mismatch.Actual)
 }
 
 // doBrowserFlow dispatches to browserFlowFn (test hook), the device-code flow,

@@ -10,10 +10,9 @@ import (
 	"strings"
 
 	"go.kenn.io/msgvault/internal/msgraph"
+	"go.kenn.io/msgvault/internal/msmail"
 	"golang.org/x/oauth2"
 )
-
-const defaultGraphURL = "https://graph.microsoft.com/v1.0"
 
 // Microsoft Graph delegated permission scopes for Teams ingestion.
 const (
@@ -127,7 +126,7 @@ func newGraphManager(clientID, tenantID, redirectURI, tokensDir string, logger *
 		redirectURI: redirectURI,
 		tokensDir:   tokensDir,
 		logger:      logger,
-		graphURL:    defaultGraphURL,
+		graphURL:    msmail.GraphBaseURL,
 	}
 }
 
@@ -174,7 +173,7 @@ func (m *GraphManager) Authorize(ctx context.Context, email string) error {
 	}
 	_, claims, err := d.resolveTokenEmail(ctx, email, token, nonce)
 	var mismatch *TokenMismatchError
-	if errors.As(err, &mismatch) && claims != nil && claims.Email == "" {
+	if errors.As(err, &mismatch) && claims.Email == "" {
 		err = m.confirmMailbox(ctx, email, token.AccessToken, mismatch)
 	}
 	if err != nil {

@@ -335,7 +335,7 @@ func TestAuthorize_OtherUPNKeepsExistingToken(t *testing.T) {
 	err := m.Authorize(t.Context(), "alice@company.com")
 	mismatch := &TokenMismatchError{}
 	require.ErrorAs(err, &mismatch)
-	assert.Contains(err.Error(), "msgvault add-o365 alice@company.com --sign-in bob@company.com")
+	assert.Contains(err.Error(), "re-run the same command with --sign-in bob@company.com added")
 	tf, err := m.loadTokenFile("alice@company.com")
 	require.NoError(err)
 	assert.Equal("old-access", tf.AccessToken, "existing token untouched")
