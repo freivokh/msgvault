@@ -6,11 +6,12 @@
   import CardDAVAccountSettings from './CardDAVAccountSettings.svelte';
   import CardDAVOperations from './CardDAVOperations.svelte';
 
-  let { client, values, connection, orphaned, onSaved, onAvailabilityChange }: {
+  let { client, values, connection, orphaned, platform = undefined, onSaved, onAvailabilityChange }: {
     client: APIClient;
     values: CardDAVAccountValues;
     connection: string;
     orphaned: boolean;
+    platform?: string;
     onSaved: () => void | Promise<void>;
     onAvailabilityChange: (connection: string, available: boolean) => void;
   } = $props();
@@ -29,7 +30,7 @@
   }
 </script>
 
-<CardDAVAccountSettings {client} {values} {connection} onSaved={accountSaved} />
+<CardDAVAccountSettings {client} {values} {connection} {platform} onSaved={accountSaved} />
 {#if !orphaned}
   <CardDAVOperations {controller} syncConnection={connection} />
 {/if}

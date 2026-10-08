@@ -54,6 +54,17 @@ describe('CardDAVAccountSettings', () => {
     expect(screen.queryByLabelText('Password')).toBeNull();
   });
 
+  it.each([
+    ['windows', 'Authorize from Command Prompt instead', `msgvault carddav authorize-google "o'brien@example.com" --oauth-app "Work App"`],
+    ['linux', 'Authorize from the terminal instead', `msgvault carddav authorize-google 'o'\\''brien@example.com' --oauth-app 'Work App'`],
+  ])('quotes the terminal sign-in command for a %s daemon', (platform, summary, command) => {
+    const googleValues = { ...values, provider: 'google', oauthApp: 'Work App', username: "o'brien@example.com" };
+    render(CardDAVAccountSettings, { client: createAPIClient(async () => Response.json({})), values: googleValues, platform });
+
+    expect(screen.getByText(summary)).toBeDefined();
+    expect(screen.getByText(/^msgvault carddav authorize-google/).textContent).toBe(command);
+  });
+
   it('shows Save CardDAV account as the solid blue primary action', () => {
     render(CardDAVAccountSettings, { client: createAPIClient(async () => Response.json({})), values });
 

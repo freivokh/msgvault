@@ -9,6 +9,7 @@
   import type { APIClient } from '../../api/client';
   import type { CardDAVAccountRequest as GeneratedCardDAVAccountRequest } from '../../api/generated/models';
   import { authorizeGoogleContacts } from '../../settings/google-authorization';
+  import { shellQuote } from '../../settings/shell-quote';
   import type { CardDAVAccountValues } from '../../carddav/account-settings';
   import CronField from './CronField.svelte';
   type CardDAVAccountRequest = GeneratedCardDAVAccountRequest;
@@ -17,11 +18,13 @@
     client,
     values,
     connection = undefined,
+    platform = undefined,
     onSaved = () => undefined,
   }: {
     client: APIClient;
     values: CardDAVAccountValues;
     connection?: string;
+    platform?: string;
     onSaved?: () => void | Promise<void>;
   } = $props();
   const initialValues = untrack(() => values);
@@ -34,7 +37,6 @@
   const google = $derived(provider === 'google');
   const microsoft = $derived(provider === 'microsoft');
   const oauth = $derived(google || microsoft);
-  function shellQuote(value: string): string { return "'" + value.replaceAll("'", "'\\''") + "'"; }
   function selectProvider(value: string) {
     provider = value;
     password = '';
@@ -42,9 +44,9 @@
   }
   let baseURL = $state(initialValues.baseURL);
   let username = $state(initialValues.username);
-  const authorizationCommand = $derived(`msgvault carddav authorize-google ${shellQuote(username || 'you@example.com')}${oauthApp ? ` --oauth-app ${shellQuote(oauthApp)}` : ''}`);
+  const authorizationCommand = $derived(`msgvault carddav authorize-google ${shellQuote(username || 'you@example.com', platform)}${oauthApp ? ` --oauth-app ${shellQuote(oauthApp, platform)}` : ''}`);
   // Sign-in only: saving stays with this form, so a connection keeps its schedule.
-  const microsoftCommand = $derived(`msgvault carddav authorize-microsoft ${shellQuote(username || 'you@example.com')}`);
+  const microsoftCommand = $derived(`msgvault carddav authorize-microsoft ${shellQuote(username || 'you@example.com', platform)}`);
   let password = $state('');
   let persistedBaseURL = $state(initialValues.baseURL);
   let persistedUsername = $state(initialValues.username);
@@ -279,7 +281,7 @@
       </div>
       <p>Register <code>{window.location.origin}/</code> as an authorized redirect URI in your Google OAuth app. Keep existing permissions checked when granting contacts access.</p>
       <p>Your contacts account and OAuth app can differ from your mail accounts. A matching Google authorization is reused; otherwise, CardDAV stores separate credentials.</p>
-      <details><summary>Authorize from the terminal instead</summary>
+      <details><summary>Authorize from {platform === 'windows' ? 'Command Prompt' : 'the terminal'} instead</summary>
         <code class="authorization-command">{authorizationCommand}</code>
         <p>For a remote daemon, copy the authorized token to that host before testing. <a href="https://msgvault.io/docs/usage/people-carddav/#google-contacts" target="_blank" rel="noreferrer">Google Contacts setup</a></p>
       </details>

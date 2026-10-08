@@ -12432,6 +12432,7 @@ type SessionStatus struct {
 	CsrfToken        *string               `json:"csrf_token,omitzero"`
 	HTTPS            bool                  `json:"https"`
 	PlainHTTPWarning bool                  `json:"plain_http_warning"`
+	Platform         *string               `json:"platform,omitzero"`
 }
 
 func (s SessionStatus) Validate() error {
