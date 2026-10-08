@@ -11,6 +11,7 @@
   import AppShell from './lib/components/shell/AppShell.svelte';
   import MessagePage from './lib/components/reader/MessagePage.svelte';
   import { startScreenViewReporting } from './lib/telemetry/screen-views';
+  import { startSessionReporting } from './lib/telemetry/session';
   import type { ExploreSearchMode } from './lib/explore/models';
   import { availableSearchModeStorage, parseSearchMode, rememberSearchMode } from './lib/search/modes';
   import {
@@ -82,6 +83,10 @@
   $effect(() => {
     if (oauthCallback || !shellMounted || messageID === undefined) return;
     return startScreenViewReporting(session.client, 'message');
+  });
+  $effect(() => {
+    if (session.authMode === undefined || session.authMode === 'required') return;
+    return startSessionReporting(session.client);
   });
   async function loadBrowserDefaults(generation: number): Promise<void> {
     try {

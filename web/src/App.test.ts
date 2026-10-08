@@ -248,6 +248,7 @@ describe('application foundation', () => {
   it('reports app_opened once after interactive login and never from the login screen', async () => {
     window.history.replaceState(null, '', '/');
     const telemetryRequests: Request[] = [];
+    const sessionRequests: Request[] = [];
     const fetchFn = vi.fn<typeof fetch>(async (input) => {
       const request = input instanceof Request ? input : new Request(input);
       const path = new URL(request.url).pathname;
@@ -263,9 +264,12 @@ describe('application foundation', () => {
         });
       }
       if (path === '/api/v1/telemetry/events') {
-        if ((await request.clone().json()).event === 'app_opened') telemetryRequests.push(request);
+        const event = (await request.clone().json()).event;
+        if (event === 'app_opened') telemetryRequests.push(request);
+        if (event === 'session_ended') sessionRequests.push(request);
         return Response.json({ status: 'disabled' }, { status: 202 });
       }
+      if (path === '/api/session/logout') return new Response(null, { status: 204 });
       if (path === '/api/v1/settings') return Response.json({ settings: [], pending_restart: false });
       if (path === '/api/v1/explore') {
         return Response.json({ rows: [], total_count: 0, cache_revision: 'login', search_provenance: {} });
@@ -275,6 +279,8 @@ describe('application foundation', () => {
     const session = createSessionController(fetchFn);
     render(App, { session });
     expect(await screen.findByRole('form', { name: 'Log in' })).toBeDefined();
+    window.dispatchEvent(new PageTransitionEvent('pagehide'));
+    expect(sessionRequests).toHaveLength(0);
     expect(telemetryRequests).toHaveLength(0);
     await fireEvent.input(screen.getByLabelText('API key'), { target: { value: 'test-key' } });
     await fireEvent.click(screen.getByRole('button', { name: 'Log in' }));
@@ -282,6 +288,15 @@ describe('application foundation', () => {
     await waitFor(() => expect(telemetryRequests).toHaveLength(1));
     expect(telemetryRequests[0].method).toBe('POST');
     expect(telemetryRequests[0].headers.get('X-CSRF-Token')).toBe('csrf-token');
+    window.dispatchEvent(new PageTransitionEvent('pagehide'));
+    await waitFor(() => expect(sessionRequests).toHaveLength(1));
+    expect(sessionRequests[0].keepalive).toBe(true);
+    expect(sessionRequests[0].headers.get('X-CSRF-Token')).toBe('csrf-token');
+    await session.logout();
+    expect(await screen.findByRole('form', { name: 'Log in' })).toBeDefined();
+    window.dispatchEvent(new PageTransitionEvent('pageshow'));
+    window.dispatchEvent(new PageTransitionEvent('pagehide'));
+    expect(sessionRequests).toHaveLength(1);
   });
   it.each([
     ['semantic', 'Semantic'],

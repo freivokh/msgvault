@@ -15,6 +15,7 @@ import (
 	"go.kenn.io/msgvault/internal/logging"
 	"go.kenn.io/msgvault/internal/peoplebrowser"
 	"go.kenn.io/msgvault/internal/query"
+	"go.kenn.io/msgvault/internal/telemetry"
 	"go.kenn.io/msgvault/internal/tui"
 	apiclient "go.kenn.io/msgvault/pkg/client/generated"
 )
@@ -142,7 +143,9 @@ HTTP Mode:
 		// everything, so 'msgvault logs -f' in another pane
 		// continues to work for diagnostics.
 		if err := withTUIFileLogger(currentLogResult, func() error {
+			started := time.Now()
 			_, err := p.Run()
+			reportTUISession(cmd.Context(), backend.client, time.Since(started))
 			if err != nil {
 				return fmt.Errorf("run tui: %w", err)
 			}
@@ -153,6 +156,18 @@ HTTP Mode:
 
 		return nil
 	},
+}
+
+func reportTUISession(ctx context.Context, client *daemonclient.Client, duration time.Duration) {
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 3*time.Second)
+	defer cancel()
+	generated, err := client.GeneratedClient()
+	if err != nil {
+		return
+	}
+	_, _ = generated.CaptureTelemetryEvent(ctx, &apiclient.CaptureTelemetryEventRequestOptions{
+		Body: &apiclient.CaptureTelemetryEventBody{Event: telemetry.EventSessionEnded, Properties: map[string]any{"surface": "tui", "duration_bucket": telemetry.DurationBucket(duration)}},
+	})
 }
 
 func tuiScreenReporter(client *daemonclient.Client) func(context.Context, string) error {
