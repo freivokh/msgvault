@@ -608,7 +608,8 @@ func cardDAVContactValuesNeedConflict(stored, incoming vcard.ResourceEnvelope) b
 		}
 	}
 	for _, property := range changed {
-		if strings.TrimSpace(property.RawValue) == "" || property.RawValue == `\n` {
+		// A blank value, such as an escaped line break, imports nothing; the value it replaced counts as removed.
+		if cardDAVContactValueIsBlank(property.RawValue) {
 			continue
 		}
 		if !cardDAVContactValueIsPlain(property) {
@@ -643,6 +644,11 @@ func cardDAVContactValue(kind ContactAddressKind, value string) string {
 		return value[len(prefix):]
 	}
 	return value
+}
+
+func cardDAVContactValueIsBlank(raw string) bool {
+	value, err := vcard.UnescapeText(raw)
+	return err == nil && strings.TrimSpace(value) == ""
 }
 
 func cardDAVContactValueIsPlain(property vcard.SemanticProperty) bool {
@@ -1426,152 +1432,24 @@ func (s *Store) rebaseCardDAVImportedProjectionTx(
 			return false, err
 		}
 		for _, owner := range owners {
-			mapping, property, kept := owner.mapping, owner.property.Name, owner.kept
+			mapping, kept := owner.mapping, owner.kept
 			if kept {
 				keptOwners[mapping.Table] = append(keptOwners[mapping.Table], mapping.RowID)
 			}
 			if resolveRemote && !kept {
-				// Independent fields keep their ownership when one occurrence is displaced.
-				envelope.NativeMappings = slices.DeleteFunc(envelope.NativeMappings, func(candidate vcard.NativeMapping) bool {
-					return candidate.Table == mapping.Table && candidate.RowID == mapping.RowID &&
-						(mapping.Table != "employments" && mapping.Field != "derived_fn" || candidate.Field == mapping.Field)
-				})
-				var supersede func(context.Context, *loggedTx, int64, int64, *time.Time) error
-				switch mapping.Table {
-				case personNamesTableName:
-					if mapping.Field == "derived_fn" {
-						continue
-					}
-					supersede = s.supersedePersonNameTx
-				case personContactPointsTableName:
-					supersede = s.supersedePersonContactPointTx
-				case "person_addresses":
-					supersede = s.supersedePersonAddressTx
-				case "person_dates":
-					supersede = s.supersedePersonDateTx
-				case "person_categories":
-					supersede = s.supersedePersonCategoryTx
-				case "person_media":
-					supersede = s.supersedePersonMediaTx
-				case "person_attribute_values":
-					value, err := s.attributeValueByIDTx(ctx, tx, personAttributeOwner, mapping.RowID)
-					if errors.Is(err, sql.ErrNoRows) {
-						continue
-					}
-					if err != nil {
-						return false, err
-					}
-					if value.OwnerID == personID && value.ActiveUntil == nil && value.SupersededAt == nil {
-						now := time.Now().UTC()
-						if _, err := s.closePersonAttributeValueTx(ctx, tx, mapping.RowID, now, now); err != nil {
-							return false, err
-						}
-					}
-					continue
-				case "employments":
-					employment, err := getEmploymentTx(ctx, tx, mapping.RowID)
-					if errors.Is(err, ErrEmploymentNotFound) {
-						continue
-					}
-					if err != nil {
-						return false, err
-					}
-					if employment.PersonID != personID {
-						continue
-					}
-					update := EmploymentInput{
-						PersonID: employment.PersonID, OrganizationID: employment.OrganizationID,
-						Title: employment.Title, Role: employment.Role, Department: employment.Department,
-						Location: employment.Location, AddressID: employment.AddressID, Description: employment.Description,
-						StartDate: employment.StartDate, EndDate: employment.EndDate,
-						IsCurrent: &employment.IsCurrent, IsPrimary: &employment.IsPrimary,
-						Source: employment.Source, SourceRef: employment.SourceRef, Confidence: employment.Confidence,
-					}
-					switch mapping.Field {
-					case "title":
-						update.Title = nil
-					case "role":
-						update.Role = nil
-					case "organization_id":
-						// A required organization stays in history after its card projection is displaced.
-						update.IsPrimary = new(false)
-						envelope.NativeMappings = slices.DeleteFunc(envelope.NativeMappings, func(candidate vcard.NativeMapping) bool {
-							return candidate.Table == mapping.Table && candidate.RowID == mapping.RowID
-						})
-					}
-					if _, err := s.reviseEmploymentTx(ctx, tx, mapping.RowID, employment.Revision, update); err != nil {
-						return false, err
-					}
-					continue
-				case "person_relationships":
-					var sourceID, targetID int64
-					err := tx.QueryRowContext(ctx, `DELETE FROM person_relationships WHERE id = ? AND (source_person_id = ? OR target_person_id = ?)
-						RETURNING source_person_id, target_person_id`, mapping.RowID, personID, personID).Scan(&sourceID, &targetID)
-					if errors.Is(err, sql.ErrNoRows) {
-						continue
-					}
-					if err != nil {
-						return false, fmt.Errorf("retire displaced CardDAV relationship: %w", err)
-					}
-					if err := s.bumpPersonVCardProjectionsTx(ctx, tx, sourceID, targetID); err != nil {
-						return false, err
-					}
-					continue
-				case "person_relationship_reviews":
-					if _, err := s.claimRelationshipReviewTx(ctx, tx, mapping.RowID, RelationshipReviewRejected, string(ProvenanceUser)); err != nil &&
-						!errors.Is(err, ErrRelationshipReviewNotFound) && !errors.Is(err, ErrRelationshipReviewNotPending) {
-						return false, err
-					}
-					continue
-				}
-				if supersede != nil {
-					if err := supersede(ctx, tx, personID, mapping.RowID, nil); err != nil && !errors.Is(err, ErrProfileValueNotFound) {
-						return false, err
-					}
-					continue
-				}
-			}
-			if property == "FN" && mapping.Table == personNamesTableName && mapping.Field == "formatted" {
-				name, err := getPersonNameTx(ctx, tx, personID, mapping.RowID)
-				if errors.Is(err, ErrProfileValueNotFound) {
-					continue
-				}
+				retired, err := s.retireDisplacedCardDAVOwnerTx(ctx, tx, personID, &envelope.ResourceEnvelope, mapping)
 				if err != nil {
 					return false, err
 				}
-				if !name.Envelope.IsCurrent() {
+				if retired {
 					continue
 				}
-				if !kept && cardDAVOwnerIsReplaceable(owner, name.Envelope) {
-					if err := s.supersedePersonNameTx(ctx, tx, personID, mapping.RowID, nil); err != nil {
-						return false, err
-					}
-				} else if kept {
-					skip[mapping.Identity.Key()] = true
-				}
-				continue
 			}
-			if property == "FN" && mapping.Table == "persons" && kept {
-				skip[mapping.Identity.Key()] = true
-			}
-			if mapping.Table != personContactPointsTableName || (property != "EMAIL" && property != "TEL") {
-				continue
-			}
-			point, err := getPersonContactPointTx(ctx, tx, personID, mapping.RowID)
-			if errors.Is(err, ErrProfileValueNotFound) {
-				continue
-			}
+			skipOccurrence, err := s.rebaseCardDAVReplaceableOwnerTx(ctx, tx, personID, owner)
 			if err != nil {
 				return false, err
 			}
-			if !point.Envelope.IsCurrent() {
-				continue
-			}
-			if !kept && cardDAVOwnerIsReplaceable(owner, point.Envelope) {
-				if err := s.supersedePersonContactPointTx(ctx, tx, personID, mapping.RowID, nil); err != nil {
-					return false, err
-				}
-			} else if kept {
+			if skipOccurrence {
 				skip[mapping.Identity.Key()] = true
 			}
 		}
@@ -1654,6 +1532,169 @@ func (s *Store) rebaseCardDAVImportedProjectionTx(
 		}
 	}
 	return remoteOwnsDisplay, nil
+}
+
+// retireDisplacedCardDAVOwnerTx applies a keep_remote resolution to a value the
+// remote card no longer carries. It reports false for owners that the
+// replaceable-owner rebase handles instead.
+func (s *Store) retireDisplacedCardDAVOwnerTx(
+	ctx context.Context, tx *loggedTx, personID int64, envelope *vcard.ResourceEnvelope, mapping vcard.NativeMapping,
+) (bool, error) {
+	// Employment fields and derived names keep their other mappings when one occurrence is displaced.
+	independentFields := mapping.Table == "employments" || mapping.Field == "derived_fn"
+	envelope.NativeMappings = slices.DeleteFunc(envelope.NativeMappings, func(candidate vcard.NativeMapping) bool {
+		return candidate.Table == mapping.Table && candidate.RowID == mapping.RowID &&
+			(!independentFields || candidate.Field == mapping.Field)
+	})
+	var supersede func(context.Context, *loggedTx, int64, int64, *time.Time) error
+	switch mapping.Table {
+	case personNamesTableName:
+		if mapping.Field == "derived_fn" {
+			return true, nil
+		}
+		supersede = s.supersedePersonNameTx
+	case personContactPointsTableName:
+		supersede = s.supersedePersonContactPointTx
+	case "person_addresses":
+		supersede = s.supersedePersonAddressTx
+	case "person_dates":
+		supersede = s.supersedePersonDateTx
+	case "person_categories":
+		supersede = s.supersedePersonCategoryTx
+	case "person_media":
+		supersede = s.supersedePersonMediaTx
+	case personAttributeValuesTableName:
+		return true, s.closeDisplacedCardDAVAttributeTx(ctx, tx, personID, mapping.RowID)
+	case "employments":
+		return true, s.retireDisplacedCardDAVEmploymentFieldTx(ctx, tx, personID, envelope, mapping)
+	case personRelationshipsTableName:
+		return true, s.deleteDisplacedCardDAVRelationshipTx(ctx, tx, personID, mapping.RowID)
+	case personRelationshipReviewsTableName:
+		_, err := s.claimRelationshipReviewTx(ctx, tx, mapping.RowID, RelationshipReviewRejected, string(ProvenanceUser))
+		if err != nil && !errors.Is(err, ErrRelationshipReviewNotFound) && !errors.Is(err, ErrRelationshipReviewNotPending) {
+			return true, err
+		}
+		return true, nil
+	default:
+		return false, nil
+	}
+	if err := supersede(ctx, tx, personID, mapping.RowID, nil); err != nil && !errors.Is(err, ErrProfileValueNotFound) {
+		return true, err
+	}
+	return true, nil
+}
+
+func (s *Store) closeDisplacedCardDAVAttributeTx(ctx context.Context, tx *loggedTx, personID, valueID int64) error {
+	value, err := s.attributeValueByIDTx(ctx, tx, personAttributeOwner, valueID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if value.OwnerID != personID || value.ActiveUntil != nil || value.SupersededAt != nil {
+		return nil
+	}
+	now := time.Now().UTC()
+	_, err = s.closePersonAttributeValueTx(ctx, tx, valueID, now, now)
+	return err
+}
+
+func (s *Store) retireDisplacedCardDAVEmploymentFieldTx(
+	ctx context.Context, tx *loggedTx, personID int64, envelope *vcard.ResourceEnvelope, mapping vcard.NativeMapping,
+) error {
+	employment, err := getEmploymentTx(ctx, tx, mapping.RowID)
+	if errors.Is(err, ErrEmploymentNotFound) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if employment.PersonID != personID {
+		return nil
+	}
+	update := EmploymentInput{
+		PersonID: employment.PersonID, OrganizationID: employment.OrganizationID,
+		Title: employment.Title, Role: employment.Role, Department: employment.Department,
+		Location: employment.Location, AddressID: employment.AddressID, Description: employment.Description,
+		StartDate: employment.StartDate, EndDate: employment.EndDate,
+		IsCurrent: &employment.IsCurrent, IsPrimary: &employment.IsPrimary,
+		Source: employment.Source, SourceRef: employment.SourceRef, Confidence: employment.Confidence,
+	}
+	switch mapping.Field {
+	case "title":
+		update.Title = nil
+	case "role":
+		update.Role = nil
+	case "organization_id":
+		// A required organization stays in history after its card projection is displaced.
+		update.IsPrimary = new(false)
+		envelope.NativeMappings = slices.DeleteFunc(envelope.NativeMappings, func(candidate vcard.NativeMapping) bool {
+			return candidate.Table == mapping.Table && candidate.RowID == mapping.RowID
+		})
+	}
+	_, err = s.reviseEmploymentTx(ctx, tx, mapping.RowID, employment.Revision, update)
+	return err
+}
+
+func (s *Store) deleteDisplacedCardDAVRelationshipTx(ctx context.Context, tx *loggedTx, personID, relationshipID int64) error {
+	var sourceID, targetID int64
+	err := tx.QueryRowContext(ctx, `DELETE FROM person_relationships WHERE id = ? AND (source_person_id = ? OR target_person_id = ?)
+		RETURNING source_person_id, target_person_id`, relationshipID, personID, personID).Scan(&sourceID, &targetID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("retire displaced CardDAV relationship: %w", err)
+	}
+	return s.bumpPersonVCardProjectionsTx(ctx, tx, sourceID, targetID)
+}
+
+// rebaseCardDAVReplaceableOwnerTx supersedes a displaced FN, EMAIL, or TEL row
+// that a remote edit may replace. It reports whether the card occurrence of a
+// kept owner must not be imported again.
+func (s *Store) rebaseCardDAVReplaceableOwnerTx(
+	ctx context.Context, tx *loggedTx, personID int64, owner cardDAVResourceOwner,
+) (bool, error) {
+	mapping, property := owner.mapping, owner.property.Name
+	var (
+		envelope  ValueEnvelope
+		supersede func(context.Context, *loggedTx, int64, int64, *time.Time) error
+	)
+	switch {
+	case property == "FN" && mapping.Table == "persons":
+		return owner.kept, nil
+	case property == "FN" && mapping.Table == personNamesTableName && mapping.Field == "formatted":
+		name, err := getPersonNameTx(ctx, tx, personID, mapping.RowID)
+		if errors.Is(err, ErrProfileValueNotFound) {
+			return false, nil
+		}
+		if err != nil {
+			return false, err
+		}
+		envelope, supersede = name.Envelope, s.supersedePersonNameTx
+	case (property == "EMAIL" || property == "TEL") && mapping.Table == personContactPointsTableName:
+		point, err := getPersonContactPointTx(ctx, tx, personID, mapping.RowID)
+		if errors.Is(err, ErrProfileValueNotFound) {
+			return false, nil
+		}
+		if err != nil {
+			return false, err
+		}
+		envelope, supersede = point.Envelope, s.supersedePersonContactPointTx
+	default:
+		return false, nil
+	}
+	if !envelope.IsCurrent() {
+		return false, nil
+	}
+	if owner.kept {
+		return true, nil
+	}
+	if cardDAVOwnerIsReplaceable(owner, envelope) {
+		return false, supersede(ctx, tx, personID, mapping.RowID, nil)
+	}
+	return false, nil
 }
 
 // retireCardDAVImportedProjectionTx removes one resource's current semantic
