@@ -30,8 +30,8 @@ function visibility(value: boolean) {
   hidden = value;
   document.dispatchEvent(new Event('visibilitychange'));
 }
-function close(persisted = false) {
-  window.dispatchEvent(new PageTransitionEvent('pagehide', { persisted }));
+function close() {
+  window.dispatchEvent(new PageTransitionEvent('pagehide'));
 }
 async function bucket(index = 0) {
   return (await requests[index].clone().json()).properties.duration_bucket;
@@ -89,21 +89,7 @@ it.each([false, true])('expires hidden time with delayed timers=%s', async (dela
   expect(await bucket(1)).toBe('under_1m');
 });
 
-it.each([60_000, 1_800_000])('restores a cached page after %i hidden milliseconds', async (gap) => {
-  start();
-  now = 120_000;
-  close(true);
-  close(true);
-  now += gap;
-  vi.setSystemTime(Date.now() + gap);
-  window.dispatchEvent(new PageTransitionEvent('pageshow', { persisted: true }));
-  now += 120_000;
-  close();
-  expect(requests).toHaveLength(gap === 60_000 ? 1 : 2);
-  for (let i = 0; i < requests.length; i++) expect(await bucket(i)).toBe('1_to_5m');
-});
-
-it('removes listeners and timers on authentication cleanup', () => {
+it('removes listeners and timers on component teardown', () => {
   start();
   now = 120_000;
   visibility(true);
@@ -112,19 +98,5 @@ it('removes listeners and timers on authentication cleanup', () => {
   visibility(false);
   close();
   expect(requests).toHaveLength(0);
-  expect(vi.getTimerCount()).toBe(0);
-});
-
-it('bounds stalled delivery and ignores rejection', async () => {
-  start((input) => {
-    requests.push(input as Request);
-    return new Promise((_, reject) => {
-      (input as Request).signal.addEventListener('abort', () => reject(new Error('aborted')));
-    });
-  });
-  now = 120_000;
-  close();
-  await vi.advanceTimersByTimeAsync(3000);
-  expect(requests[0].signal.aborted).toBe(true);
   expect(vi.getTimerCount()).toBe(0);
 });

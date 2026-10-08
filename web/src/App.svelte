@@ -2,7 +2,7 @@
   import { getSettings as generatedGetSettings } from './lib/api/generated/api/api';
   import { Button } from '@kenn-io/kit-ui';
   import { startAppOpenedReporting } from '@kenn-io/kit-ui/utils/app-opened';
-  import { onMount } from 'svelte';
+  import { onDestroy, onMount } from 'svelte';
   import { receiveGoogleContactsCallback } from './lib/settings/google-authorization';
   import { createSessionController, type SessionController } from './lib/api/session.svelte';
   import { provideKataReadiness } from './lib/kata/kata-ready.svelte';
@@ -84,10 +84,12 @@
     if (oauthCallback || !shellMounted || messageID === undefined) return;
     return startScreenViewReporting(session.client, 'message');
   });
+  let stopSessionReporting: (() => void) | undefined;
   $effect(() => {
     if (session.authMode === undefined || session.authMode === 'required') return;
-    return startSessionReporting(session.client);
+    stopSessionReporting ??= startSessionReporting(session.client);
   });
+  onDestroy(() => stopSessionReporting?.());
   async function loadBrowserDefaults(generation: number): Promise<void> {
     try {
       const { data } = await generatedGetSettings(session.client);

@@ -11,6 +11,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/spf13/cobra"
 	"go.kenn.io/msgvault/internal/api"
+	"go.kenn.io/msgvault/internal/config"
 	"go.kenn.io/msgvault/internal/daemonclient"
 	"go.kenn.io/msgvault/internal/logging"
 	"go.kenn.io/msgvault/internal/peoplebrowser"
@@ -93,6 +94,11 @@ HTTP Mode:
 			return err
 		}
 		defer backend.cleanup()
+		telemetryClient, err := newTUITelemetryClient(cmd.Context(), currentCfg, backend.info)
+		if err != nil {
+			return err
+		}
+		defer telemetryClient.Close()
 		if backend.info.Kind == HTTPStoreConfiguredRemote {
 			fmt.Printf("Connected to remote: %s\n", currentCfg.Remote.URL)
 		}
@@ -145,7 +151,9 @@ HTTP Mode:
 		if err := withTUIFileLogger(currentLogResult, func() error {
 			started := time.Now()
 			_, err := p.Run()
-			reportTUISession(cmd.Context(), backend.client, time.Since(started))
+			if tuiProgramRan(err) {
+				reportTUISession(cmd.Context(), telemetryClient, time.Since(started))
+			}
 			if err != nil {
 				return fmt.Errorf("run tui: %w", err)
 			}
@@ -156,6 +164,19 @@ HTTP Mode:
 
 		return nil
 	},
+}
+
+func newTUITelemetryClient(ctx context.Context, cfg *config.Config, info HTTPStoreInfo) (*daemonclient.Client, error) {
+	clientConfig := daemonclient.Config{URL: info.URL, APIKey: cfg.Server.AuthenticationKey(), AllowInsecure: true}
+	if info.Kind == HTTPStoreConfiguredRemote {
+		clientConfig.APIKey = cfg.Remote.AuthenticationKey()
+		clientConfig.AllowInsecure = cfg.Remote.AllowInsecure
+	}
+	return newDaemonCLIClient(context.WithoutCancel(ctx), clientConfig)
+}
+
+func tuiProgramRan(err error) bool {
+	return err == nil || errors.Is(err, tea.ErrInterrupted)
 }
 
 func reportTUISession(ctx context.Context, client *daemonclient.Client, duration time.Duration) {
