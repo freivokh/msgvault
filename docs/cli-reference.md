@@ -1,5 +1,5 @@
 ---
-last_edited: "2026-10-06"
+last_edited: "2026-10-07"
 title: CLI Reference
 description: Complete command reference for all msgvault commands.
 ---
@@ -2245,14 +2245,17 @@ MSGVAULT_HOME=./subset-vault msgvault tui
 |---|---|
 | `-o`, `--output <directory>` | Destination directory (required) |
 | `--rows <count>` | Number of most recent messages to copy; must be positive (required) |
-| `--include-identity` | Copy complete identity clusters for included participants |
+| `--include-identity` | Copy complete identity clusters for included participants and every confirmed address of each included account |
 | `--include-attributes` | Copy current and historical person and organization attribute values |
 | `--include-profiles` | Copy profiles, profile history and media, relationships, employment history, and referenced organizations |
 | `--include-vcard-resources` | Copy complete native vCards and retired UID aliases; requires `--include-profiles` |
 
-The command is SQLite-only. The optional identity, attribute, profile, and
-vCard flags can copy personal records that have no message in the subset; read
-the command's warning before sharing its output.
+The command is SQLite-only. Without `--include-identity`, it copies only the
+confirmed addresses each account's included messages use, including addresses
+in the stored headers of mail not yet attributed, so each message keeps its
+account. The optional identity, attribute, profile, and vCard flags can copy
+personal records that have no message in the subset; read the command's
+warning before sharing its output.
 
 ---
 
@@ -3997,10 +4000,14 @@ msgvault repair-derived
 msgvault repair-derived --source-type beeper
 ```
 
-Repeat `--source-type` or `--identifier` to narrow the source set. Only source
-types with a registered re-derivation pass are supported; an unknown requested
-type is an error. Source syncs also run pending re-derivation passes, so use this
-command for on-demand repair or retrying an interrupted pass.
+Repeat `--source-type` or `--identifier` to narrow the source set. A requested
+type that has no re-derivation pass and no source in the archive is an error.
+Source types with a re-derivation pass (`beeper`, `discord`) recompute their
+derived text and metadata. Every source also derives account attribution for
+email and calendar rows still pending it, so `received:` and `account:` find
+them. Source syncs and imports run the same work first, so use this command
+for on-demand repair, file imports you will not run again, or retrying an
+interrupted pass.
 
 ## gc
 
