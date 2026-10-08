@@ -100,7 +100,7 @@ recurrence limits, notification behavior, and reconciliation instructions.
 The API publishes its generated OpenAPI contract at `/openapi.json`.
 `msgvault openapi` prints the checked-in contract without starting a daemon or
 opening an archive. OpenAPI `info.version` is the **API schema version**;
-it is separate from the binary release version. The current schema is **3.7.0**.
+it is separate from the binary release version. The current schema is **3.8.0**.
 Upgrade clients and daemon together across incompatible schema versions,
 including remote deployments.
 
@@ -126,6 +126,9 @@ reports the code as that connection's failure, and run history records it as
 the failure code.
 
 Schema 3.5.0 adds the `account:` and `received:` search operators.
+
+Schema 3.8.0 adds structured `account_scopes` filters, the Explore account
+filter, and the virtual account catalog on `/cli/accounts`.
 
 Schema 3.1.0 adds unreleased [calendar event control](#calendar-control),
 availability queries, and opt-in `write` on Calendar consent plans.

@@ -351,7 +351,9 @@ import (
 // 3.5.0 adds the account: and received: search operators.
 // 3.6.0 adds GET /api/v1/messages/{id}/recordings for live audio and transcript coverage.
 // 3.7.0 adds scoped lexical transcript search at GET /api/v1/media/search.
-const APISchemaVersion = "3.7.0"
+// 3.8.0 adds structured account scopes, the explore account filter and the
+// virtual account catalog on /cli/accounts.
+const APISchemaVersion = "3.8.0"
 
 // OpenAPIDocument builds the API schema from the same Huma route registration
 // used by the daemon. It binds no socket and needs no database.
@@ -1264,7 +1266,7 @@ func applyClientCodegenExtensions(doc *huma.OpenAPI) {
 			"readiness": {"ExploreCacheUnavailableResponseReadinessAbsent", "ExploreCacheUnavailableResponseReadinessBuilding", "ExploreCacheUnavailableResponseReadinessInterrupted", "ExploreCacheUnavailableResponseReadinessStaleSchema", "ExploreCacheUnavailableResponseReadinessDrifted"},
 		},
 		"ExploreFilter": {
-			"dimension": {"ExploreFilterDimensionSource", "ExploreFilterDimensionParticipant", "ExploreFilterDimensionDomain", "ExploreFilterDimensionMessageType", "ExploreFilterDimensionMailingList", "ExploreFilterDimensionAfter", "ExploreFilterDimensionBefore", "ExploreFilterDimensionDeletion", "ExploreFilterDimensionIdentity"},
+			"dimension": {"ExploreFilterDimensionSource", "ExploreFilterDimensionParticipant", "ExploreFilterDimensionDomain", "ExploreFilterDimensionMessageType", "ExploreFilterDimensionMailingList", "ExploreFilterDimensionAfter", "ExploreFilterDimensionBefore", "ExploreFilterDimensionDeletion", "ExploreFilterDimensionIdentity", "ExploreFilterDimensionAccount"},
 		},
 		"ExploreGroupSort": {
 			"direction": {"ExploreGroupSortDirectionAsc", "ExploreGroupSortDirectionDesc"},
