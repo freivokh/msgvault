@@ -30,9 +30,10 @@ export function startSessionReporting(client: APIClient) {
   };
   const resume = () => {
     if (hiddenSince !== undefined && Date.now() - hiddenSince >= 1_800_000) end();
-    if (document.hidden || !signedIn) return;
+    if (document.hidden) return;
     clearTimer();
     hiddenSince = undefined;
+    if (!signedIn) return;
     seen = true;
     if (started === undefined) started = performance.now();
   };

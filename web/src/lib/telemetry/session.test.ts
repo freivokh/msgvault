@@ -85,6 +85,25 @@ it('pauses while signed out and resumes earlier signed-in time', async () => {
   expect(requests).toHaveLength(1);
 });
 
+it.each([false, true])('preserves signed-in time after a visible signed-out wait with delayed timers=%s', async (delayed) => {
+  const reporter = start();
+  now = 40_000;
+  reporter.signedIn(false);
+  visibility(true);
+  now += 10_000;
+  vi.advanceTimersByTime(10_000);
+  visibility(false);
+  now += 1_800_000;
+  if (delayed) vi.setSystemTime(Date.now() + 1_800_000);
+  else vi.advanceTimersByTime(1_800_000);
+  expect(requests).toHaveLength(0);
+  reporter.signedIn(true);
+  now += 30_000;
+  close();
+  expect(requests).toHaveLength(1);
+  expect(await bucket()).toBe('1_to_5m');
+});
+
 it('ignores a session that was always hidden', () => {
   hidden = true;
   start();

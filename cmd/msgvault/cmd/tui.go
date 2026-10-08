@@ -172,7 +172,7 @@ func reportTUISession(ctx context.Context, cfg *config.Config, info HTTPStoreInf
 	if err != nil {
 		return
 	}
-	defer client.Close()
+	defer func() { _ = client.Close() }()
 	// daemonclient.New already built and cached the generated client.
 	generated, _ := client.GeneratedClient()
 	_, _ = generated.CaptureTelemetryEvent(ctx, &apiclient.CaptureTelemetryEventRequestOptions{

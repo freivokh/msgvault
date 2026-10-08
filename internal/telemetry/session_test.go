@@ -23,18 +23,21 @@ func TestDurationBucket(t *testing.T) {
 }
 
 func TestSessionEndedWire(t *testing.T) {
+	assert := assert.New(t)
+	require := require.New(t)
 	stub := newWireStub(t)
 	runWireHelper(t, stub.server.URL, t.TempDir(), "MSGVAULT_SESSION_TEST=1")
 	messages := batchEvents(t, stub)
-	require.Len(t, messages, 3)
+	require.Len(messages, 3)
 	for i, expected := range []map[string]any{
 		{"surface": "web", "duration_bucket": "1_to_5m"},
 		{"surface": "tui", "duration_bucket": "5_to_30m"}, {},
 	} {
-		assert.Equal(t, EventSessionEnded, messages[i]["event"])
-		props := messages[i]["properties"].(map[string]any)
+		assert.Equal(EventSessionEnded, messages[i]["event"])
+		props, ok := messages[i]["properties"].(map[string]any)
+		require.True(ok)
 		for _, key := range []string{"surface", "duration_bucket"} {
-			assert.Equal(t, expected[key], props[key])
+			assert.Equal(expected[key], props[key])
 		}
 	}
 }
