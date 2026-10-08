@@ -424,6 +424,10 @@ type Model struct {
 	collectionScopes      []query.CollectionScope
 	sourceScope           sourceScope
 
+	// accountCatalogRetries counts catalog rereads after the daemon reported
+	// the virtual account catalog unavailable.
+	accountCatalogRetries int
+
 	// Content filters
 	filters struct {
 		attachmentsOnly       bool // show only messages with attachments
@@ -650,10 +654,22 @@ type statsLoadedMsg struct {
 	presentationGeneration uint64
 }
 
-// accountsLoadedMsg is sent when accounts are loaded.
+// accountsLoadedMsg is sent when accounts are loaded. catalogUnavailable
+// reports that the virtual account catalog could not be read, so accounts
+// carry no receiving-address children.
 type accountsLoadedMsg struct {
-	accounts []query.AccountInfo
-	err      error
+	accounts           []query.AccountInfo
+	catalogUnavailable bool
+	err                error
+}
+
+// accountCatalogRetryMsg rereads accounts after an unavailable catalog.
+type accountCatalogRetryMsg struct{}
+
+// accountCatalogRetryDelays spaces catalog rereads, so receiving addresses
+// appear once a slow first catalog read finishes.
+var accountCatalogRetryDelays = []time.Duration{
+	2 * time.Second, 5 * time.Second, 10 * time.Second, 20 * time.Second, 30 * time.Second,
 }
 
 type collectionScopesLoadedMsg struct {
@@ -819,10 +835,12 @@ func (m Model) loadAccounts() tea.Cmd {
 					"error", err)
 				return accountsLoadedMsg{err: err}
 			}
+			catalogUnavailable := false
 			if lister, ok := m.engine.(query.VirtualAccountLister); ok {
 				// The picker still works without children when the catalog fails.
 				if virtual, err := lister.ListVirtualAccounts(ctx); err != nil {
 					slog.Warn("tui loadAccounts: ListVirtualAccounts failed", "error", err)
+					catalogUnavailable = true
 				} else {
 					for i := range accounts {
 						accounts[i].VirtualAccounts = virtual[accounts[i].ID]
@@ -831,7 +849,7 @@ func (m Model) loadAccounts() tea.Cmd {
 			}
 			slog.Info("tui loadAccounts ok",
 				"accounts", len(accounts))
-			return accountsLoadedMsg{accounts: accounts}
+			return accountsLoadedMsg{accounts: accounts, catalogUnavailable: catalogUnavailable}
 		},
 		func(r any) tea.Msg {
 			return accountsLoadedMsg{err: fmt.Errorf("accounts panic: %v", r)}
@@ -1381,6 +1399,8 @@ func (m Model) Update(msg tea.Msg) (result tea.Model, command tea.Cmd) {
 		return m.handleStatsLoaded(msg)
 	case accountsLoadedMsg:
 		return m.handleAccountsLoaded(msg)
+	case accountCatalogRetryMsg:
+		return m, m.loadAccounts()
 	case collectionScopesLoadedMsg:
 		return m.handleCollectionScopesLoaded(msg)
 	case updateCheckMsg:
@@ -1713,10 +1733,28 @@ func (m Model) handleStatsLoaded(msg statsLoadedMsg) (tea.Model, tea.Cmd) {
 
 // handleAccountsLoaded processes accounts load completion.
 func (m Model) handleAccountsLoaded(msg accountsLoadedMsg) (tea.Model, tea.Cmd) {
-	if msg.err == nil {
-		m.accounts = msg.accounts
+	if msg.err != nil {
+		return m, nil
 	}
-	return m, nil
+	if !msg.catalogUnavailable {
+		m.accounts = msg.accounts
+		return m, nil
+	}
+	// Keep the receiving addresses already known while the catalog is down.
+	previous := make(map[int64][]store.VirtualAccount, len(m.accounts))
+	for _, account := range m.accounts {
+		previous[account.ID] = account.VirtualAccounts
+	}
+	for i := range msg.accounts {
+		msg.accounts[i].VirtualAccounts = previous[msg.accounts[i].ID]
+	}
+	m.accounts = msg.accounts
+	if m.accountCatalogRetries >= len(accountCatalogRetryDelays) {
+		return m, nil
+	}
+	delay := accountCatalogRetryDelays[m.accountCatalogRetries]
+	m.accountCatalogRetries++
+	return m, tea.Tick(delay, func(time.Time) tea.Msg { return accountCatalogRetryMsg{} })
 }
 
 func (m Model) handleCollectionScopesLoaded(msg collectionScopesLoadedMsg) (tea.Model, tea.Cmd) {
