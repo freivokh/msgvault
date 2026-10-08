@@ -1311,3 +1311,46 @@ func (s *Service) dav() *davRemote {
 	}
 	return remote
 }
+
+func TestSubscribedImportKeepsValuesAPublishedCardCouldNotRoundTrip(t *testing.T) {
+	assert := assert.New(t)
+	require := require.New(t)
+	fixture := &conflictMutationServer{}
+	server := httptest.NewServer(fixture.handler(t))
+	t.Cleanup(server.Close)
+	body := []byte("BEGIN:VCARD\r\nVERSION:3.0\r\nUID:person\r\nFN;CHARSET=UTF-8:Alice Example\r\n" +
+		"EMAIL:e1@example.test\r\nTEL:+1 202 555 0100 x23\r\nTEL:+49 30/1234567\r\nEND:VCARD\r\n")
+	fixture.setRemote(body, `"remote-1"`)
+	service, st, book := newPullService(t, server, false)
+	_, err := service.Sync(t.Context(), SyncOptions{Full: true})
+	require.NoError(err)
+	mapping, err := st.GetCardDAVResourceContext(t.Context(), book.ID, book.CanonicalURL+"person.vcf")
+	require.NoError(err)
+	require.NotNil(mapping.PersonID)
+
+	assertProfile := func(email string) {
+		t.Helper()
+		points, err := st.ListPersonContactPointsContext(t.Context(), *mapping.PersonID, true)
+		require.NoError(err)
+		values := make([]string, 0, len(points))
+		for _, point := range points {
+			values = append(values, point.OriginalValue)
+		}
+		assert.ElementsMatch([]string{email, "+1 202 555 0100 x23", "+49 30/1234567"}, values)
+		names, err := st.ListPersonNamesContext(t.Context(), *mapping.PersonID, true)
+		require.NoError(err)
+		formatted := make([]string, 0, len(names))
+		for _, name := range names {
+			if name.NameKind == store.PersonNameFormatted && name.Formatted != nil {
+				formatted = append(formatted, *name.Formatted)
+			}
+		}
+		assert.Equal([]string{"Alice Example"}, formatted)
+	}
+	assertProfile("e1@example.test")
+
+	fixture.setRemote(bytes.Replace(body, []byte("e1@example.test"), []byte("e2@example.test"), 1), `"remote-2"`)
+	_, err = service.Sync(t.Context(), SyncOptions{Full: true})
+	require.NoError(err)
+	assertProfile("e2@example.test")
+}

@@ -727,6 +727,20 @@ func cardDAVRebindOwners(stored, incoming vcard.ResourceEnvelope) ([]cardDAVReso
 	return owners, nil
 }
 
+// cardDAVPersonPublishedToCardTx reports whether msgvault publishes the person to this card.
+func (s *Store) cardDAVPersonPublishedToCardTx(
+	ctx context.Context, tx *loggedTx, personID, bookID int64, href string,
+) (bool, error) {
+	publication, err := getCardDAVPublicationFrom(ctx, tx, personID, "")
+	if errors.Is(err, ErrCardDAVPublicationNotFound) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("load CardDAV publication for imported projection: %w", err)
+	}
+	return publication.Desired && publication.AddressBookID == bookID && publication.Href == href, nil
+}
+
 // cardDAVPublishedPersonUnchangedLocallyTx reports a settled publication to this card with no local edit since the last sync.
 func (s *Store) cardDAVPublishedPersonUnchangedLocallyTx(
 	ctx context.Context, tx *loggedTx, bookID, personID int64, resource *CardDAVResource, snapshot *PersonVCardSnapshot,
@@ -1268,6 +1282,11 @@ func (s *Store) addCardDAVImportedProjectionTx(
 			return err
 		}
 	}
+	// A published card must round-trip; values the profile would rewrite stay on the card as residue.
+	published, err := s.cardDAVPersonPublishedToCardTx(ctx, tx, personID, bookID, input.Href)
+	if err != nil {
+		return err
+	}
 	bind := func(identity vcard.PropertyIdentity, table string, rowID int64, field string) {
 		resource.NativeMappings = slices.DeleteFunc(resource.NativeMappings, func(mapping vcard.NativeMapping) bool {
 			return mapping.Identity.Equal(identity)
@@ -1332,7 +1351,10 @@ func (s *Store) addCardDAVImportedProjectionTx(
 				representable = false
 			}
 		}
-		if representable {
+		if !representable && !published {
+			name.Language, name.Script, name.PhoneticSystem, name.SortAs = nil, nil, nil, nil
+		}
+		if representable || !published {
 			row, err := s.addPersonNameTx(ctx, tx, personID, name)
 			if err != nil {
 				return err
@@ -1359,7 +1381,7 @@ func (s *Store) addCardDAVImportedProjectionTx(
 			}
 			if index < len(point.occurrences) {
 				property := vcard.NormalizeSemanticProperty(resource.RenderMetadata.StoredVersion, properties[point.occurrences[index].Key()])
-				if !cardDAVContactValueIsPlain(property) {
+				if published && !cardDAVContactValueIsPlain(property) {
 					continue
 				}
 				parameters(&envelope, point.occurrences[index])
