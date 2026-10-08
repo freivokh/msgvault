@@ -266,7 +266,20 @@ To publish a person, open their saved profile in **Directory** and turn on
 **Publish person to CardDAV**. A contact UID identifies that published person
 across syncs. Later profile changes are reconciled to the write target.
 Turning publication off removes the remote card while retaining the local
-profile.
+profile. When only the address book changed a published contact, edits to its
+emails and phones apply on the next sync when only plain values change and
+their parameters stay the same. A label-only change, such as `TYPE=home` to
+`TYPE=work`, raises a conflict, and so does editing a value that has a label in
+msgvault. Changed or added values the import cannot store
+intact, such as a telephone URI with `;ext=`, also raise a conflict. Unchanged
+values stay on the card and allow other edits to apply. A remote rename applies
+only when the person has no structured name. For a person with a structured
+name, a remote rename raises a conflict. Removing a plain email or phone value
+from the card hides it on the profile, even one msgvault learned from messages.
+Changing an existing value msgvault can't import, such as an address, raises a
+conflict. Fields added in the address book stay on the card without reaching
+the profile. Deleting the contact in the address book turns publication off and
+keeps the profile.
 
 The same actions are available from the CLI:
 
@@ -378,8 +391,11 @@ connection's credential needs repair.
 ## Resolve competing edits
 
 If both msgvault and the address book changed the same card, msgvault records a
-conflict for review. It also records edit/delete conflicts instead of silently
-choosing a side.
+conflict for review. A remote-only edit to a field the pull cannot apply on a
+published contact also raises a conflict. Its two sides can look identical in
+the summary when the change is in a field the summary doesn't show, such as an
+address. msgvault records edit/delete conflicts instead of silently choosing a
+side.
 
 ```bash
 msgvault carddav conflicts list

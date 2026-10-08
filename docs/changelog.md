@@ -22,6 +22,14 @@ All notable changes to msgvault, grouped by release.
   `MSGVAULT_TELEMETRY_ENABLED=0` turns it off, and `serve` says so at startup
   while it's on. See [telemetry](configuration.md#telemetry).
 
+- Address-book edits to a published contact's name, emails and phones now reach
+  the person instead of being overwritten. Edits to an unlabeled email or phone
+  value apply. Changing a label, or a value that carries one, raises a
+  conflict. Changing an existing value msgvault can't import, such as an
+  address, raises a conflict. Fields added in the address book stay on the card
+  without reaching the profile. Deleting a published contact in the address
+  book turns publication off and keeps the person.
+
 - `list-accounts` and `embeddings list` keep working while a sync, import, or
   embedding build runs. Accounts whose counts aren't ready yet show `pending`.
 

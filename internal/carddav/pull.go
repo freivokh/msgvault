@@ -387,6 +387,7 @@ func parseRemoteResource(href, etag string, body []byte) (store.CardDAVRemoteRes
 				}
 				resource.DisplayName = strings.TrimSpace(value)
 				resource.DisplayNameIdentity = identity
+				resource.DisplayNameOccurrence = occurrence.Identity
 			}
 		case "EMAIL":
 			value, err := cardDAVPropertyValue(envelope.RenderMetadata.StoredVersion, property)
@@ -397,6 +398,7 @@ func parseRemoteResource(href, etag string, body []byte) (store.CardDAVRemoteRes
 			if value != "" {
 				resource.Emails = append(resource.Emails, value)
 				resource.EmailIdentities = append(resource.EmailIdentities, identity)
+				resource.EmailOccurrences = append(resource.EmailOccurrences, occurrence.Identity)
 			}
 		case "TEL":
 			value, err := cardDAVPropertyValue(envelope.RenderMetadata.StoredVersion, property)
@@ -407,6 +409,7 @@ func parseRemoteResource(href, etag string, body []byte) (store.CardDAVRemoteRes
 			if value != "" {
 				resource.Phones = append(resource.Phones, value)
 				resource.PhoneIdentities = append(resource.PhoneIdentities, identity)
+				resource.PhoneOccurrences = append(resource.PhoneOccurrences, occurrence.Identity)
 			}
 		}
 	}

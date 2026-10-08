@@ -1297,9 +1297,10 @@ func (s *Store) ResolveCardDAVConflictRemoteContext(
 				return ErrCardDAVConflictStale
 			}
 			if publicationPersonID != nil {
-				if _, err := tx.ExecContext(ctx, `DELETE FROM carddav_publications WHERE person_id = ? AND address_book_id=? AND href=?`,
-					*publicationPersonID, conflict.AddressBookID, conflict.Href); err != nil {
-					return fmt.Errorf("cancel retained CardDAV remote tombstone publication: %w", err)
+				if err := s.cancelCardDAVPublicationForRemoteDeleteTx(
+					ctx, tx, *publicationPersonID, conflict.AddressBookID, conflict.Href, false,
+				); err != nil {
+					return err
 				}
 			}
 		} else {
@@ -1310,7 +1311,7 @@ func (s *Store) ResolveCardDAVConflictRemoteContext(
 			remoteOwnsDisplay := false
 			if mapping.PersonID != nil {
 				remoteOwnsDisplay, err = s.rebaseCardDAVImportedProjectionTx(
-					ctx, tx, book.ID, *mapping.PersonID, input.Remote,
+					ctx, tx, book.ID, *mapping.PersonID, input.Remote, true,
 				)
 				if err != nil {
 					return err
@@ -1505,4 +1506,26 @@ func scanCardDAVConflict(row scanner) (*CardDAVConflict, error) {
 		conflict.ResolvedAt = &value
 	}
 	return &conflict, nil
+}
+
+// cancelCardDAVPublicationForRemoteDeleteTx turns publication off after the address book deleted the card.
+func (s *Store) cancelCardDAVPublicationForRemoteDeleteTx(
+	ctx context.Context, tx *loggedTx, personID, bookID int64, href string, settledOnly bool,
+) error {
+	query := `DELETE FROM carddav_publications WHERE person_id = ? AND address_book_id = ? AND href = ?`
+	if settledOnly {
+		query += ` AND desired = TRUE AND pending_operation IS NULL`
+	}
+	result, err := tx.ExecContext(ctx, query, personID, bookID, href)
+	if err != nil {
+		return fmt.Errorf("cancel CardDAV publication for remote delete: %w", err)
+	}
+	deleted, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if deleted > 0 {
+		return s.clearPersonCardDAVInferenceApprovalTx(ctx, tx, personID)
+	}
+	return nil
 }

@@ -315,7 +315,15 @@ func (s *Service) prepareMappingConflict(
 	}
 	localChanged := localTombstone || localHash != mapping.LocalHash
 	remoteChanged := remoteTombstone || remote.SemanticHash != mapping.RemoteSemanticHash
-	if !unresolved && (!localChanged || !remoteChanged) {
+	unimportedOwner := false
+	if !unresolved && !localChanged && remoteChanged && !remoteTombstone && mapping.PersonID != nil {
+		var err error
+		unimportedOwner, err = s.store.CardDAVPublishedRemoteNeedsConflictContext(ctx, book.ID, mapping.Href, remote.RemoteBody)
+		if err != nil {
+			return store.CardDAVConflictCapture{}, false, err
+		}
+	}
+	if !unresolved && !unimportedOwner && (!localChanged || !remoteChanged) {
 		return store.CardDAVConflictCapture{}, false, nil
 	}
 	if !unresolved && localTombstone && remoteTombstone {

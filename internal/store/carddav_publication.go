@@ -275,6 +275,14 @@ func (s *Store) prepareCardDAVPublicationTx(ctx context.Context, tx *loggedTx, p
 			if etag := strings.TrimSpace(resource.RemoteETag); etag == "" || etag == "*" {
 				return ErrCardDAVInvalidPlan
 			}
+			if plan.Desired && current != nil && current.Desired &&
+				current.AddressBookID == plan.AddressBookID && current.Href == resource.Href &&
+				current.LocalHash == snapshot.Fingerprint && resource.LocalHash == snapshot.Fingerprint {
+				current.Noop = true
+				prepared = current
+				return nil
+			}
+
 			if plan.Desired && plan.OutgoingSemanticHash == resource.RemoteSemanticHash {
 				if len(plan.OutgoingEnvelopeMetadata) > 0 {
 					if err := s.putCardDAVPublicationEnvelopeTx(ctx, tx, plan.AddressBookID, plan.PersonID, resource.Href,
@@ -659,6 +667,9 @@ func (s *Store) CommitCardDAVPublicationContext(
 			if _, err := tx.ExecContext(ctx, `DELETE FROM carddav_resources WHERE id = ?`, resource.ID); err != nil {
 				return err
 			}
+			if _, err := tx.ExecContext(ctx, `UPDATE carddav_address_books SET sync_revision = sync_revision + 1 WHERE id = ?`, current.AddressBookID); err != nil {
+				return fmt.Errorf("advance CardDAV publication sync fence: %w", err)
+			}
 			if _, err = tx.ExecContext(ctx, `DELETE FROM carddav_publications WHERE person_id = ?`, current.PersonID); err != nil {
 				return err
 			}
@@ -732,6 +743,9 @@ func (s *Store) CommitCardDAVPublicationContext(
 			}
 		} else if err := s.putCardDAVEnvelopeTx(ctx, tx, current.AddressBookID, current.PersonID, input.Remote); err != nil {
 			return err
+		}
+		if _, err := tx.ExecContext(ctx, `UPDATE carddav_address_books SET sync_revision = sync_revision + 1 WHERE id = ?`, current.AddressBookID); err != nil {
+			return fmt.Errorf("advance CardDAV publication sync fence: %w", err)
 		}
 
 		result, err := tx.ExecContext(ctx, `UPDATE carddav_publications SET desired = TRUE,
