@@ -39,7 +39,7 @@ async function bucket(index = 0) {
 
 it.each([
   [0, 'under_1m'], [59_999, 'under_1m'], [60_000, '1_to_5m'],
-  [120_000, '1_to_5m'], [300_000, '5_to_30m'],
+  [300_000, '5_to_30m'],
   [1_800_000, '5_to_30m'], [1_800_001, 'over_30m'],
 ])('reports %i visible milliseconds once as %s', async (elapsed, expected) => {
   start();

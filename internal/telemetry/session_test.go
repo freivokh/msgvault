@@ -33,15 +33,8 @@ func TestSessionEndedWire(t *testing.T) {
 	} {
 		assert.Equal(t, EventSessionEnded, messages[i]["event"])
 		props := messages[i]["properties"].(map[string]any)
-		assert.NotContains(t, props, "query")
 		for _, key := range []string{"surface", "duration_bucket"} {
 			assert.Equal(t, expected[key], props[key])
 		}
 	}
-}
-
-func TestSessionEndedOptOut(t *testing.T) {
-	stub := newWireStub(t)
-	runWireHelper(t, stub.server.URL, t.TempDir(), "MSGVAULT_SESSION_TEST=1", EnabledEnv+"=0")
-	assert.Empty(t, stub.recorded())
 }

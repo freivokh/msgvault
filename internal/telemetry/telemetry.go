@@ -97,6 +97,7 @@ func buildReporter(opts Options, endpoint string, logger *slog.Logger) (*posthog
 }
 
 // DurationBucket groups session runtime without reporting an exact duration.
+// Keep thresholds and names in sync with web/src/lib/telemetry/session.ts.
 func DurationBucket(duration time.Duration) string {
 	switch {
 	case duration < time.Minute:

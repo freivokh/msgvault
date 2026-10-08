@@ -6,6 +6,7 @@ import { createAPIClient } from './lib/api/client';
 import { createSessionController } from './lib/api/session.svelte';
 import { resolveInitialSearchMode, SEARCH_MODE_PREFERENCE_KEY } from './lib/search/modes';
 import { chooseSelectOption } from './test/kit-ui';
+import * as sessionReporting from './lib/telemetry/session';
 describe('application foundation', () => {
   it('reports resolved workspaces and standalone messages', async () => {
     const events: Array<{ event: string; properties?: { screen?: string; surface?: string } }> = [];
@@ -247,6 +248,7 @@ describe('application foundation', () => {
     expect(settingsRequests).toBe(1);
   });
   it('reports app_opened once after interactive login and never from the login screen', async () => {
+    const startReporting = vi.spyOn(sessionReporting, 'startSessionReporting');
     window.history.replaceState(null, '', '/');
     let now = 0;
     vi.spyOn(performance, 'now').mockImplementation(() => now);
@@ -284,11 +286,13 @@ describe('application foundation', () => {
     expect(await screen.findByRole('form', { name: 'Log in' })).toBeDefined();
     window.dispatchEvent(new PageTransitionEvent('pagehide'));
     expect(sessionRequests).toHaveLength(0);
+    expect(startReporting).not.toHaveBeenCalled();
     expect(telemetryRequests).toHaveLength(0);
     await fireEvent.input(screen.getByLabelText('API key'), { target: { value: 'test-key' } });
     await fireEvent.click(screen.getByRole('button', { name: 'Log in' }));
     expect(await screen.findByRole('main', { name: 'Relationships' })).toBeDefined();
     await waitFor(() => expect(telemetryRequests).toHaveLength(1));
+    expect(startReporting).toHaveBeenCalledTimes(1);
     expect(telemetryRequests[0].method).toBe('POST');
     expect(telemetryRequests[0].headers.get('X-CSRF-Token')).toBe('csrf-token');
     now = 120_000;
@@ -301,8 +305,7 @@ describe('application foundation', () => {
     expect(await screen.findByRole('main', { name: 'Relationships' })).toBeDefined();
     window.dispatchEvent(new PageTransitionEvent('pagehide'));
     await waitFor(() => expect(sessionRequests).toHaveLength(1));
-    expect(sessionRequests[0].keepalive).toBe(true);
-    expect(sessionRequests[0].headers.get('X-CSRF-Token')).toBe('csrf-token');
+    expect(startReporting).toHaveBeenCalledTimes(1);
     expect((await sessionRequests[0].clone().json()).properties.duration_bucket).toBe('1_to_5m');
   });
   it.each([

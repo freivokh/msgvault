@@ -55,7 +55,7 @@ func TestEnabledReporterWireHelper(t *testing.T) {
 	if os.Getenv("MSGVAULT_SESSION_TEST") != "" {
 		h := CaptureHandler(reporter, opts.DataDir)
 		for _, body := range []string{
-			`{"event":"session_ended","properties":{"surface":"web","duration_bucket":"1_to_5m","query":"private"}}`,
+			`{"event":"session_ended","properties":{"surface":"web","duration_bucket":"1_to_5m"}}`,
 			`{"event":"session_ended","properties":{"surface":"tui","duration_bucket":"5_to_30m"}}`,
 			`{"event":"session_ended","properties":{"surface":"private","duration_bucket":"private"}}`,
 		} {

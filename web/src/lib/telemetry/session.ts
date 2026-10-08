@@ -1,4 +1,5 @@
 import type { APIClient } from '../api/client';
+import { captureTelemetryEvent } from '../api/generated/api/api';
 
 export function startSessionReporting(client: APIClient): () => void {
   let started = document.hidden ? undefined : performance.now();
@@ -20,15 +21,11 @@ export function startSessionReporting(client: APIClient): () => void {
     hiddenSince = undefined;
     pause();
     if (!seen) return;
+    // Keep thresholds and names in sync with internal/telemetry/telemetry.go DurationBucket.
     const duration = visible < 60_000 ? 'under_1m' : visible < 300_000 ? '1_to_5m' : visible <= 1_800_000 ? '5_to_30m' : 'over_30m';
     visible = 0;
     seen = false;
-    void client.fetch('/api/v1/telemetry/events', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ event: 'session_ended', properties: { surface: 'web', duration_bucket: duration } }),
-      keepalive: true,
-    }).catch(() => undefined);
+    void captureTelemetryEvent({ event: 'session_ended', properties: { surface: 'web', duration_bucket: duration } }, { ...client, keepalive: true }).catch(() => undefined);
   };
   const resume = () => {
     if (hiddenSince !== undefined && Date.now() - hiddenSince >= 1_800_000) end();
