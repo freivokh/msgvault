@@ -1,7 +1,8 @@
 import type { APIClient } from '../api/client';
 import { captureTelemetryEvent } from '../api/generated/api/api';
 
-export function startSessionReporting(client: APIClient): () => void {
+export function startSessionReporting(client: APIClient) {
+  let signedIn = true;
   let started = document.hidden ? undefined : performance.now();
   let visible = 0;
   let seen = !document.hidden;
@@ -25,11 +26,11 @@ export function startSessionReporting(client: APIClient): () => void {
     const duration = visible < 60_000 ? 'under_1m' : visible < 300_000 ? '1_to_5m' : visible <= 1_800_000 ? '5_to_30m' : 'over_30m';
     visible = 0;
     seen = false;
-    void captureTelemetryEvent({ event: 'session_ended', properties: { surface: 'web', duration_bucket: duration } }, { ...client, keepalive: true }).catch(() => undefined);
+    if (signedIn) void captureTelemetryEvent({ event: 'session_ended', properties: { surface: 'web', duration_bucket: duration } }, { ...client, keepalive: true }).catch(() => undefined);
   };
   const resume = () => {
     if (hiddenSince !== undefined && Date.now() - hiddenSince >= 1_800_000) end();
-    if (document.hidden) return;
+    if (document.hidden || !signedIn) return;
     clearTimer();
     hiddenSince = undefined;
     seen = true;
@@ -48,10 +49,17 @@ export function startSessionReporting(client: APIClient): () => void {
   document.addEventListener('visibilitychange', visibility);
   window.addEventListener('pagehide', end);
   window.addEventListener('pageshow', resume);
-  return () => {
-    clearTimer();
-    document.removeEventListener('visibilitychange', visibility);
-    window.removeEventListener('pagehide', end);
-    window.removeEventListener('pageshow', resume);
+  return {
+    stop() {
+      clearTimer();
+      document.removeEventListener('visibilitychange', visibility);
+      window.removeEventListener('pagehide', end);
+      window.removeEventListener('pageshow', resume);
+    },
+    signedIn(value: boolean) {
+      signedIn = value;
+      if (signedIn) resume();
+      else pause();
+    },
   };
 }

@@ -5,6 +5,7 @@
   import { onDestroy, onMount } from 'svelte';
   import { receiveGoogleContactsCallback } from './lib/settings/google-authorization';
   import { createSessionController, type SessionController } from './lib/api/session.svelte';
+  import { createSessionAwareAPIClient } from './lib/api/client';
   import { provideKataReadiness } from './lib/kata/kata-ready.svelte';
   import Login from './lib/components/auth/Login.svelte';
   import SettingsWorkspace from './lib/components/settings/SettingsWorkspace.svelte';
@@ -84,12 +85,13 @@
     if (oauthCallback || !shellMounted || messageID === undefined) return;
     return startScreenViewReporting(session.client, 'message');
   });
-  let stopSessionReporting: (() => void) | undefined;
+  let reporter: ReturnType<typeof startSessionReporting> | undefined;
   $effect(() => {
-    if (session.authMode === undefined || session.authMode === 'required') return;
-    stopSessionReporting ??= startSessionReporting(session.client);
+    const signedIn = session.authMode !== undefined && session.authMode !== 'required';
+    if (signedIn) reporter ??= startSessionReporting(createSessionAwareAPIClient(fetch, () => session.csrfToken));
+    reporter?.signedIn(signedIn);
   });
-  onDestroy(() => stopSessionReporting?.());
+  onDestroy(() => reporter?.stop());
   async function loadBrowserDefaults(generation: number): Promise<void> {
     try {
       const { data } = await generatedGetSettings(session.client);

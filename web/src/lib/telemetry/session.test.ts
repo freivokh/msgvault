@@ -21,10 +21,12 @@ afterEach(() => {
   vi.useRealTimers();
 });
 function start(fetchFn?: typeof fetch) {
-  stop = startSessionReporting(createSessionAwareAPIClient(fetchFn ?? (async (input) => {
+  const reporter = startSessionReporting(createSessionAwareAPIClient(fetchFn ?? (async (input) => {
     requests.push(input as Request);
     return new Response(null, { status: 202 });
   }), () => 'csrf-token'));
+  stop = reporter.stop;
+  return reporter;
 }
 function visibility(value: boolean) {
   hidden = value;
@@ -64,6 +66,23 @@ it('counts twenty visible stretches without adding hidden time', async () => {
   expect(requests).toHaveLength(0);
   close();
   expect(await bucket()).toBe('5_to_30m');
+});
+
+it('pauses while signed out and resumes earlier signed-in time', async () => {
+  const reporter = start();
+  now = 40_000;
+  reporter.signedIn(false);
+  now = 100_000;
+  reporter.signedIn(true);
+  now = 110_000;
+  close();
+  expect(requests).toHaveLength(1);
+  expect(await bucket()).toBe('under_1m');
+  window.dispatchEvent(new PageTransitionEvent('pageshow'));
+  now = 120_000;
+  reporter.signedIn(false);
+  close();
+  expect(requests).toHaveLength(1);
 });
 
 it('ignores a session that was always hidden', () => {

@@ -38,6 +38,7 @@ describe('application foundation', () => {
   });
   afterEach(() => {
     vi.restoreAllMocks();
+    vi.unstubAllGlobals();
     localStorage.removeItem(SEARCH_MODE_PREFERENCE_KEY);
     sessionStorage.removeItem('msgvault.appearance.override');
     document.documentElement.classList.remove('dark');
@@ -271,7 +272,10 @@ describe('application foundation', () => {
       if (path === '/api/v1/telemetry/events') {
         const event = (await request.clone().json()).event;
         if (event === 'app_opened') telemetryRequests.push(request);
-        if (event === 'session_ended') sessionRequests.push(request);
+        if (event === 'session_ended') {
+          sessionRequests.push(request);
+          return Response.json({ error: 'unauthorized' }, { status: 401 });
+        }
         return Response.json({ status: 'disabled' }, { status: 202 });
       }
       if (path === '/api/v1/expired') return Response.json({ error: 'unauthorized' }, { status: 401 });
@@ -281,6 +285,7 @@ describe('application foundation', () => {
       }
       return Response.json({}, { status: 404 });
     });
+    vi.stubGlobal('fetch', fetchFn);
     const session = createSessionController(fetchFn);
     render(App, { session });
     expect(await screen.findByRole('form', { name: 'Log in' })).toBeDefined();
@@ -295,18 +300,23 @@ describe('application foundation', () => {
     expect(startReporting).toHaveBeenCalledTimes(1);
     expect(telemetryRequests[0].method).toBe('POST');
     expect(telemetryRequests[0].headers.get('X-CSRF-Token')).toBe('csrf-token');
-    now = 120_000;
+    now = 40_000;
     await session.client.fetch('/api/v1/expired');
     expect(await screen.findByRole('form', { name: 'Log in' })).toBeDefined();
     expect(sessionRequests).toHaveLength(0);
-    now = 180_000;
+    now = 100_000;
     await fireEvent.input(screen.getByLabelText('API key'), { target: { value: 'test-key' } });
     await fireEvent.click(screen.getByRole('button', { name: 'Log in' }));
     expect(await screen.findByRole('main', { name: 'Relationships' })).toBeDefined();
+    now = 110_000;
     window.dispatchEvent(new PageTransitionEvent('pagehide'));
     await waitFor(() => expect(sessionRequests).toHaveLength(1));
     expect(startReporting).toHaveBeenCalledTimes(1);
-    expect((await sessionRequests[0].clone().json()).properties.duration_bucket).toBe('1_to_5m');
+    expect((await sessionRequests[0].clone().json()).properties.duration_bucket).toBe('under_1m');
+    expect(sessionRequests[0].headers.get('X-CSRF-Token')).toBe('csrf-token');
+    await new Promise((resolve) => setTimeout(resolve));
+    expect(screen.queryByRole('form', { name: 'Log in' })).toBeNull();
+    expect(screen.getByRole('main', { name: 'Relationships' })).toBeDefined();
   });
   it.each([
     ['semantic', 'Semantic'],

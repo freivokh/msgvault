@@ -1732,8 +1732,8 @@ features once published. No startup hook or entrypoint wrapper is required.
   terminal sessions measure UI runtime. Returning after 30 minutes hidden starts
   a fresh browser session. Delivery is best effort; terminal delivery has a
   three-second request timeout. A terminal UI that fails to start sends nothing.
-  A tab's time carries across signing in again; a tab closed while signed out
-  sends nothing, since the daemon accepts events only from a signed-in session.
+  Time spent signed out doesn't count. Earlier signed-in time carries across
+  signing in again, and a tab that closes or expires while signed out sends nothing.
 
 For `app_opened`, the web UI records the day it last reported in browser storage, which the
 browser keeps separately for each daemon address. With the default
