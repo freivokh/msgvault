@@ -49,4 +49,41 @@ describe('AccountFilter', () => {
     await waitFor(() => expect(fetchFn).toHaveBeenCalled());
     expect(screen.queryByRole('combobox', { name: /^Account:/ })).toBeNull();
   });
+
+  it('retries an unavailable catalog until the receiving addresses arrive', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      const account = { id: 7, email: 'inbox@example.net', type: 'gmail', display_name: '', last_sync: null, message_count: 5, source_deleted_count: 0 };
+      const fetchFn = vi
+        .fn<typeof fetch>()
+        .mockImplementationOnce(async () =>
+          Response.json({ accounts: [{ ...account, virtual_accounts: [] }], virtual_accounts_unavailable: true }),
+        )
+        .mockImplementation(async () =>
+          Response.json({
+            accounts: [
+              {
+                ...account,
+                virtual_accounts: [
+                  { key: 'identity:7:d29ya0BleGFtcGxlLm9yZw', source_id: 7, account_address: 'work@example.org', message_count: 3, source_deleted_count: 0 },
+                  { key: 'unattributed:7', source_id: 7, unattributed: true, message_count: 2, source_deleted_count: 0 },
+                ],
+              },
+            ],
+          }),
+        );
+      const onChange = vi.fn();
+      render(AccountFilter, { client: createAPIClient(fetchFn), filters: [], onChange });
+      expect((await screen.findByRole('status')).textContent).toContain('Loading accounts');
+
+      await vi.advanceTimersByTimeAsync(2000);
+      const select = await screen.findByRole('combobox', { name: /^Account:/ });
+      await waitFor(() => expect(screen.queryByRole('status')).toBeNull());
+      await chooseSelectOption(select, 'inbox@example.net / work@example.org (3)');
+      expect(onChange).toHaveBeenCalledWith([{ dimension: 'account', values: ['identity:7:d29ya0BleGFtcGxlLm9yZw'] }]);
+      expect(fetchFn).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });

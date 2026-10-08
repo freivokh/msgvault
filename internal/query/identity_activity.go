@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"go.kenn.io/msgvault/internal/identityindex"
+	"go.kenn.io/msgvault/internal/search"
 )
 
 func identityRequestIsUnfiltered(request ExploreRequest) bool {
@@ -258,6 +259,11 @@ func buildIdentityFactConditions(request ExploreRequest) (string, []any) {
 		conditions = append(conditions, "("+strings.Join(parts, " OR ")+")")
 	}
 	appendIntGroup(request.Context.SourceIDs, "f.source_id = ?")
+	if scopeConditions, scopeArgs := search.AccountScopeConditions(request.Context.AccountScopes, "account_m"); len(scopeConditions) > 0 {
+		conditions = append(conditions, "f.message_id IN (SELECT account_m.id FROM messages account_m WHERE "+
+			strings.Join(scopeConditions, " AND ")+")")
+		args = append(args, scopeArgs...)
+	}
 	if identityCondition, identityArgs := buildIdentityPredicateCondition(request.Context.Identity, "identity_entry."); identityCondition != "" {
 		conditions = append(conditions, `(EXISTS (
 			SELECT 1 FROM analytical_entries identity_entry
