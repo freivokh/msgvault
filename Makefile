@@ -71,7 +71,8 @@ PG_TEST_TAGS := fts5 sqlite_vec pgvector
 # in both configurations, so test-pg-both runs just these in the shipped-build
 # configuration. Verified by `make pg-shipped-only-check`, which re-derives the
 # closure from `go list`.
-PG_SHIPPED_ONLY_PKGS := ./cmd/msgvault ./cmd/msgvault/cmd ./internal/api ./internal/daemonclient ./internal/mcp ./internal/scheduler ./internal/store ./internal/vector/chunkmatch ./internal/vector/document ./internal/vector/embed ./internal/vector/hybrid ./internal/vector/pgvector ./scripts/contextual-retrieval-eval
+NOCGO_LINT_PKGS := ./pkg/archive/... ./internal/postgresprofile/... ./internal/sqliteutil/... ./internal/duckdbutil/... ./internal/muesli/...
+PG_SHIPPED_ONLY_PKGS := ./cmd/msgvault ./cmd/msgvault/cmd ./internal/api ./internal/daemonclient ./internal/mcp ./internal/scheduler ./internal/store ./internal/vector/chunkmatch ./internal/vector/document ./internal/vector/embed ./internal/vector/hybrid ./internal/vector/pgvector ./pkg/archive ./scripts/contextual-retrieval-eval
 
 OPENAPI_ARTIFACTS := api/openapi.yaml pkg/client/openapi.yaml pkg/client/generated
 WEB_INSTALL_STAMP := web/node_modules/.msgvault-install-stamp
@@ -193,6 +194,12 @@ test-v:
 # See docs/internal/PG_STATUS.md for the supported feature surface.
 test-pg: require-test-db
 	go test -timeout $(TEST_TIMEOUT) -p $(PG_TEST_PARALLEL) -tags "$(PG_TEST_TAGS)" ./...
+
+# PostgreSQL-only library profile: no SQLite, DuckDB, or sqlite-vec driver.
+.PHONY: test-pg-nocgo
+test-pg-nocgo: require-test-db
+	CGO_ENABLED=0 go build ./internal/store ./internal/query ./internal/slack ./internal/discord ./internal/api
+	CGO_ENABLED=0 go test -timeout $(TEST_TIMEOUT) ./internal/postgresprofile ./pkg/archive
 
 # Run the SHIPPED build's tests against PostgreSQL (set MSGVAULT_TEST_DB first).
 # The released binary is built with BUILD_TAGS and no pgvector, so that build
@@ -391,10 +398,13 @@ huma-check:
 
 .PHONY: huma-check
 
-# Run linter (CI, no auto-fix)
+# Run linter (CI, no auto-fix). The second pass lints the files that only the
+# PostgreSQL-only CGO_ENABLED=0 build compiles. It covers the packages whose
+# tests also build without CGO; the others' tests need the SQLite driver.
 lint-ci: custom-gcl testify-helper-check
 	@mkdir -p "$(GOLANGCI_LINT_TMP)"
 	TMPDIR="$(GOLANGCI_LINT_TMP)" "$(CUSTOM_GCL_BIN)" run ./...
+	CGO_ENABLED=0 TMPDIR="$(GOLANGCI_LINT_TMP)" "$(CUSTOM_GCL_BIN)" run $(NOCGO_LINT_PKGS)
 	@if [ -n "$$GITHUB_PATH" ]; then \
 		$(MAKE) --no-print-directory vuln-tools; \
 		printf '%s\n' "$(CI_TOOLS_BIN)" >> "$$GITHUB_PATH"; \
