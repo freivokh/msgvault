@@ -14231,6 +14231,18 @@ components:
         - speaker
         - text
       type: object
+    TriggerSyncResponse:
+      properties:
+        disposition:
+          type: string
+        message:
+          type: string
+        status:
+          type: string
+      required:
+        - status
+        - message
+      type: object
     UpdateRequest:
       additionalProperties: false
       properties:
@@ -30001,7 +30013,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/StatusMessageResponse"
+                $ref: "#/components/schemas/TriggerSyncResponse"
           description: Accepted
         default:
           content:
