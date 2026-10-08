@@ -54,8 +54,7 @@ servers are also supported. See [recommended configuration](docs/usage/recommend
 for the choices and consent steps.
 
 The daemon also sends anonymous usage telemetry, a daily ping and web and terminal
-UI events (app opened, screen viewed, session length) carrying the version,
-platform and a random install ID, never archive
+UI usage carrying the version, platform and a random install ID, never archive
 content. See [telemetry](docs/configuration.md#telemetry) for the full list and
 how to turn it off.
 

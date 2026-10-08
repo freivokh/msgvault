@@ -1728,10 +1728,12 @@ features once published. No startup hook or entrypoint wrapper is required.
   per UTC day across both interfaces and daemon restarts. The daemon keeps the
   current day's screens in `telemetry-screen-views.json` beside its install ID.
 - `session_ended` when a browser tab closes, reloads, stays hidden for 30 minutes, or the
-  terminal UI exits. Browser sessions add visible time across tab switches;
+  terminal UI exits normally or after an interrupt. Browser sessions add visible
+  time across tab switches;
   terminal sessions measure UI runtime. Returning after 30 minutes hidden starts
   a fresh browser session. Delivery is best effort; terminal delivery has a
-  three-second request timeout. A terminal UI that fails to start sends nothing.
+  three-second request timeout. Terminal startup failures, forced termination,
+  or crashes may send nothing.
   Time spent signed out doesn't count. Earlier signed-in time carries across
   signing in again, and a tab that closes or expires while signed out sends nothing.
 
