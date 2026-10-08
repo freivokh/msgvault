@@ -277,7 +277,8 @@ only when the person has no structured name. For a person with a structured
 name, a remote rename raises a conflict. Removing a plain email or phone value
 from the card hides it on the profile, even one msgvault learned from messages.
 Changing an existing value msgvault can't import, such as an address, raises a
-conflict. Fields added in the address book stay on the card without reaching
+conflict. A plain email or phone added in the address book joins the profile.
+Other fields added there, such as an address, stay on the card without reaching
 the profile. Deleting the contact in the address book turns publication off and
 keeps the profile.
 
