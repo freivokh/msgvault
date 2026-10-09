@@ -86,4 +86,45 @@ describe('AccountFilter', () => {
       vi.useRealTimers();
     }
   });
+
+  it('keeps retrying when a reread fails while the catalog recovers', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      const account = { id: 7, email: 'inbox@example.net', type: 'gmail', display_name: '', last_sync: null, message_count: 5, source_deleted_count: 0 };
+      const fetchFn = vi
+        .fn<typeof fetch>()
+        .mockImplementationOnce(async () =>
+          Response.json({ accounts: [{ ...account, virtual_accounts: [] }], virtual_accounts_unavailable: true }),
+        )
+        .mockImplementationOnce(async () => {
+          throw new TypeError('network down');
+        })
+        .mockImplementation(async () =>
+          Response.json({
+            accounts: [
+              {
+                ...account,
+                virtual_accounts: [
+                  { key: 'identity:7:d29ya0BleGFtcGxlLm9yZw', source_id: 7, account_address: 'work@example.org', message_count: 3, source_deleted_count: 0 },
+                ],
+              },
+            ],
+          }),
+        );
+      render(AccountFilter, { client: createAPIClient(fetchFn), filters: [], onChange: vi.fn() });
+      expect((await screen.findByRole('status')).textContent).toContain('Loading accounts');
+
+      await vi.advanceTimersByTimeAsync(2000);
+      await waitFor(() => expect(fetchFn).toHaveBeenCalledTimes(2));
+      expect(screen.queryByRole('alert')).toBeNull();
+      expect(screen.getByRole('status').textContent).toContain('Loading accounts');
+
+      await vi.advanceTimersByTimeAsync(5000);
+      await waitFor(() => expect(fetchFn).toHaveBeenCalledTimes(3));
+      await waitFor(() => expect(screen.queryByRole('status')).toBeNull());
+      expect(screen.getByRole('combobox', { name: /^Account:/ })).toBeTruthy();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });

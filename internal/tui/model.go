@@ -1734,27 +1734,89 @@ func (m Model) handleStatsLoaded(msg statsLoadedMsg) (tea.Model, tea.Cmd) {
 // handleAccountsLoaded processes accounts load completion.
 func (m Model) handleAccountsLoaded(msg accountsLoadedMsg) (tea.Model, tea.Cmd) {
 	if msg.err != nil {
+		// A failed reread during catalog recovery keeps to the backoff.
+		if m.accountCatalogRetries > 0 {
+			return m.scheduleAccountCatalogRetry()
+		}
 		return m, nil
 	}
+	if msg.catalogUnavailable {
+		keepKnownVirtualAccounts(msg.accounts, m.accounts)
+	}
+	m.replaceAccounts(msg.accounts)
 	if !msg.catalogUnavailable {
-		m.accounts = msg.accounts
+		m.accountCatalogRetries = 0
 		return m, nil
 	}
-	// Keep the receiving addresses already known while the catalog is down.
-	previous := make(map[int64][]store.VirtualAccount, len(m.accounts))
-	for _, account := range m.accounts {
-		previous[account.ID] = account.VirtualAccounts
-	}
-	for i := range msg.accounts {
-		msg.accounts[i].VirtualAccounts = previous[msg.accounts[i].ID]
-	}
-	m.accounts = msg.accounts
+	return m.scheduleAccountCatalogRetry()
+}
+
+// scheduleAccountCatalogRetry rereads accounts after the next backoff delay,
+// until the delays run out.
+func (m Model) scheduleAccountCatalogRetry() (tea.Model, tea.Cmd) {
 	if m.accountCatalogRetries >= len(accountCatalogRetryDelays) {
 		return m, nil
 	}
 	delay := accountCatalogRetryDelays[m.accountCatalogRetries]
 	m.accountCatalogRetries++
 	return m, tea.Tick(delay, func(time.Time) tea.Msg { return accountCatalogRetryMsg{} })
+}
+
+// keepKnownVirtualAccounts gives an account that arrived without receiving
+// addresses the ones previous held. The daemon already passes along its last
+// known children, so only accounts it has none for fall back.
+func keepKnownVirtualAccounts(accounts, previous []query.AccountInfo) {
+	known := make(map[int64][]store.VirtualAccount, len(previous))
+	for _, account := range previous {
+		known[account.ID] = account.VirtualAccounts
+	}
+	for i := range accounts {
+		if len(accounts[i].VirtualAccounts) == 0 {
+			accounts[i].VirtualAccounts = known[accounts[i].ID]
+		}
+	}
+}
+
+// replaceAccounts swaps in a new account list and keeps an open account
+// selector on the option it highlighted, whose position the new list can
+// shift.
+func (m *Model) replaceAccounts(accounts []query.AccountInfo) {
+	var highlighted *scopeOption
+	if m.modal == modalAccountSelector {
+		if options := m.selectorOptions(); m.modalCursor >= 0 && m.modalCursor < len(options) {
+			highlighted = &options[m.modalCursor]
+		}
+	}
+	m.accounts = accounts
+	if highlighted == nil {
+		return
+	}
+	for i, option := range m.selectorOptions() {
+		if sameScopeOption(*highlighted, option) {
+			m.modalCursor = i
+			return
+		}
+	}
+	m.modalCursor = 0
+}
+
+// sameScopeOption reports whether two selector options pick the same scope.
+func sameScopeOption(a, b scopeOption) bool {
+	if a.kind != b.kind {
+		return false
+	}
+	switch a.kind {
+	case scopeOptionAll:
+		return true
+	case scopeOptionVirtual:
+		return a.virtualAccount != nil && b.virtualAccount != nil && a.virtualAccount.Key == b.virtualAccount.Key
+	case scopeOptionAccount:
+		return a.accountID != nil && b.accountID != nil && *a.accountID == *b.accountID
+	case scopeOptionCollection:
+		return a.collection.Name == b.collection.Name
+	default:
+		return false
+	}
 }
 
 func (m Model) handleCollectionScopesLoaded(msg collectionScopesLoadedMsg) (tea.Model, tea.Cmd) {

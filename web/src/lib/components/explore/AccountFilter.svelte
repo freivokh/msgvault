@@ -91,12 +91,29 @@
     let timer: ReturnType<typeof setTimeout> | undefined;
     let attempt = 0;
     let shown = 0;
+    // Schedules the next reread, or ends retrying once the delays run out.
+    const scheduleRetry = (): void => {
+      retrying = attempt < retryDelaysMs.length;
+      if (retrying) {
+        timer = setTimeout(load, retryDelaysMs[attempt]);
+        attempt += 1;
+      }
+    };
+    // A failed reread while the catalog recovers keeps to the backoff; any
+    // other failure, or one after the last retry, is reported.
+    const fail = (message: string): void => {
+      if (unavailable) {
+        scheduleRetry();
+        if (retrying) return;
+      }
+      error = message;
+    };
     const load = (): void => {
       void listCLIAccounts({ ...client, signal: controller.signal })
         .then(({ data }) => {
           if (controller.signal.aborted) return;
           if (!data) {
-            error = 'Unable to load accounts.';
+            fail('Unable to load accounts.');
             return;
           }
           error = '';
@@ -108,14 +125,14 @@
             pending = read.pending;
             shown = read.options.length;
           }
-          retrying = unavailable && attempt < retryDelaysMs.length;
-          if (retrying) {
-            timer = setTimeout(load, retryDelaysMs[attempt]);
-            attempt += 1;
+          if (unavailable) {
+            scheduleRetry();
+          } else {
+            retrying = false;
           }
         })
         .catch((cause: unknown) => {
-          if (!controller.signal.aborted) error = cause instanceof Error ? cause.message : 'Unable to load accounts.';
+          if (!controller.signal.aborted) fail(cause instanceof Error ? cause.message : 'Unable to load accounts.');
         })
         .finally(() => {
           if (!controller.signal.aborted) loading = false;
