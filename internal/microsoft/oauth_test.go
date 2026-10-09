@@ -115,6 +115,8 @@ func TestScopesForEmail(t *testing.T) {
 	assert.Equal(t, ScopeIMAPOrg, orgScopes[0], "org scope")
 	personalScopes := scopesForEmail("user@hotmail.com")
 	assert.Equal(t, ScopeIMAPPersonal, personalScopes[0], "personal scope")
+	assert.Contains(t, orgScopes, scopeProfile)
+	assert.Contains(t, personalScopes, scopeProfile)
 }
 
 func TestSanitizeEmail(t *testing.T) {
@@ -169,6 +171,21 @@ func makeIDToken(t *testing.T, claims map[string]any) string {
 	require.NoError(t, err, "marshal claims")
 	body := base64.RawURLEncoding.EncodeToString(payload)
 	return header + "." + body + ".fake-sig"
+}
+
+func makeScopedIDToken(t *testing.T, claims map[string]any, scopes []string) string {
+	t.Helper()
+	requested := make(map[string]any, len(claims))
+	for key, value := range claims {
+		if key == "preferred_username" && len(missingScopes(scopes, []string{scopeProfile})) > 0 {
+			continue
+		}
+		if key == "email" && len(missingScopes(scopes, []string{scopeEmail})) > 0 {
+			continue
+		}
+		requested[key] = value
+	}
+	return makeIDToken(t, requested)
 }
 
 // testVerifyFn decodes an unsigned test JWT, bypassing OIDC validation.
@@ -305,11 +322,11 @@ func TestResolveTokenEmail_UPNFallback(t *testing.T) {
 // recording the login hint it was given when hint is non-nil.
 func upnBrowserFlow(t *testing.T, upn string, hint *string) func(context.Context, string, []string) (*oauth2.Token, string, error) {
 	t.Helper()
-	return func(_ context.Context, h string, _ []string) (*oauth2.Token, string, error) {
+	return func(_ context.Context, h string, scopes []string) (*oauth2.Token, string, error) {
 		if hint != nil {
 			*hint = h
 		}
-		idToken := makeIDToken(t, map[string]any{"preferred_username": upn, "tid": "org-tenant-id"})
+		idToken := makeScopedIDToken(t, map[string]any{"preferred_username": upn, "tid": "org-tenant-id"}, scopes)
 		tok := (&oauth2.Token{AccessToken: "new-access", RefreshToken: "new-refresh", TokenType: "Bearer"}).
 			WithExtra(map[string]any{"id_token": idToken})
 		return tok, "test-nonce", nil
@@ -384,7 +401,7 @@ func TestResolveTokenEmail_EmailClaimMismatchStillErrors(t *testing.T) {
 func TestAuthorize_ScopeCorrection(t *testing.T) {
 	require := require.New(t)
 	assert := assert.New(t)
-	// Simulate: user@custom-domain.com guessed as org, but tid reveals consumer.
+	// A custom domain is guessed as organizational, but the tenant is personal.
 	// The browser flow should be called twice: once with org scope, once with personal.
 	dir := t.TempDir()
 	m := &Manager{
@@ -400,10 +417,10 @@ func TestAuthorize_ScopeCorrection(t *testing.T) {
 
 	m.browserFlowFn = func(ctx context.Context, email string, scopes []string) (*oauth2.Token, string, error) {
 		callCount++
-		idToken := makeIDToken(t, map[string]any{
-			"email": "user@custom-domain.com",
-			"tid":   consumerTID,
-		})
+		idToken := makeScopedIDToken(t, map[string]any{
+			"preferred_username": "user@example.com",
+			"tid":                consumerTID,
+		}, scopes)
 		switch callCount {
 		case 1:
 			// First call: should have org scope (domain-based guess).
@@ -420,12 +437,12 @@ func TestAuthorize_ScopeCorrection(t *testing.T) {
 		return tok, "test-nonce", nil
 	}
 
-	require.NoError(m.Authorize(t.Context(), "user@custom-domain.com"))
+	require.NoError(m.Authorize(t.Context(), "user@example.com"))
 
 	assert.Equal(2, callCount, "browserFlowFn call count")
 
 	// Verify saved scopes are personal (corrected).
-	tf, err := m.loadTokenFile("user@custom-domain.com")
+	tf, err := m.loadTokenFile("user@example.com")
 	require.NoError(err)
 	require.NotEmpty(tf.Scopes, "saved scopes should not be empty")
 	assert.Equal(ScopeIMAPPersonal, tf.Scopes[0], "saved scopes[0]")

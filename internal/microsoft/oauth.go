@@ -49,7 +49,8 @@ const (
 	// scopeOfflineAccess is the OAuth scope requesting a refresh token.
 	scopeOfflineAccess = "offline_access"
 	// scopeEmail is the OpenID "email" scope requested alongside the IMAP scope.
-	scopeEmail = "email"
+	scopeEmail   = "email"
+	scopeProfile = "profile"
 	// logKeyEmail is the structured-log field key carrying the account email.
 	logKeyEmail = "email"
 )
@@ -61,7 +62,7 @@ func scopesForEmail(email string) []string {
 	if isPersonalMicrosoftAccount(email) {
 		imapScope = ScopeIMAPPersonal
 	}
-	return []string{imapScope, scopeOfflineAccess, "openid", scopeEmail}
+	return []string{imapScope, scopeOfflineAccess, "openid", scopeEmail, scopeProfile}
 }
 
 // isPersonalMicrosoftAccount returns true for common consumer Microsoft domains.
@@ -208,7 +209,7 @@ func (m *Manager) Authorize(ctx context.Context, email string) error {
 				"from", scopes[0],
 				"to", correctIMAPScope,
 			)
-			scopes = []string{correctIMAPScope, scopeOfflineAccess, "openid", scopeEmail}
+			scopes = []string{correctIMAPScope, scopeOfflineAccess, "openid", scopeEmail, scopeProfile}
 			token, nonce, err = flow(ctx, hint, scopes)
 			if err != nil {
 				return fmt.Errorf("re-authorize with correct IMAP scope: %w", err)
@@ -231,7 +232,7 @@ func (m *Manager) Authorize(ctx context.Context, email string) error {
 // name may legitimately differ from the mailbox.
 func (m *Manager) signInHint(email string, claims *idTokenClaims, err error) error {
 	var mismatch *TokenMismatchError
-	if !errors.As(err, &mismatch) || claims.Email != "" {
+	if !errors.As(err, &mismatch) || claims == nil || claims.Email != "" {
 		return err
 	}
 	if m.signInName != "" {
@@ -653,6 +654,7 @@ func generateSelfSignedCert(hosts []string) (tls.Certificate, error) {
 // resolveTokenEmail verifies the ID token and validates the authenticated
 // email matches the expected address. Uses OIDC signature/issuer/audience
 // validation in production, or verifyIDTokenFn in tests.
+// Claims are returned only after ID token verification succeeds.
 func (m *Manager) resolveTokenEmail(ctx context.Context, email string, token *oauth2.Token, nonce string) (string, *idTokenClaims, error) {
 	rawIDToken, _ := token.Extra("id_token").(string)
 	if rawIDToken == "" {

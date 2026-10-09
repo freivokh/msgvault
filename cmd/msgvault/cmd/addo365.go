@@ -94,7 +94,7 @@ Examples:
 		"Sign in with a device code instead of a local browser")
 	cmd.Flags().BoolVar(&o365Graph, "graph", false, "sync through the Microsoft Graph mail API instead of IMAP")
 	cmd.Flags().StringVar(&o365SignIn, "sign-in", "",
-		"Microsoft sign-in name, when it differs from the mailbox address (IMAP only)")
+		"Microsoft sign-in name and browser login hint when it differs from the mailbox address (IMAP only)")
 	cmd.MarkFlagsMutuallyExclusive("graph", "sign-in")
 	registerOAuthPreflightedFlag(cmd)
 	return cmd

@@ -2,9 +2,11 @@ package microsoft
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"sync"
 	"sync/atomic"
@@ -34,6 +36,7 @@ func TestGraphScopes(t *testing.T) {
 	assert.Contains(got, "https://graph.microsoft.com/TeamMember.Read.All")
 	assert.Contains(got, "https://graph.microsoft.com/ChannelMember.Read.All")
 	assert.Contains(got, scopeOfflineAccess)
+	assert.Contains(got, scopeProfile)
 }
 
 func TestNewGraphManager_DefaultsTenant(t *testing.T) {
@@ -99,47 +102,102 @@ func TestGraphManager_Authorize_PersistsGraphToken(t *testing.T) {
 
 func TestGraphManager_Authorize_ConfirmsMailboxViaProfile(t *testing.T) {
 	upn := map[string]any{"preferred_username": "jdoe@example.org", "tid": "org-tenant-id"}
-	for _, tc := range []struct {
-		name   string
-		claims map[string]any
-		status int
-		body   string
-		saved  bool
+	primary := map[string]any{"email": "j.doe@example.com", "tid": "org-tenant-id"}
+	absent := map[string]any{"tid": "org-tenant-id"}
+	for _, product := range []struct {
+		name       string
+		newManager func(string, string, string, string, *slog.Logger) *GraphManager
 	}{
-		{"mail", upn, http.StatusOK, `{"mail":"John@example.com","userPrincipalName":"jdoe@example.org"}`, true},
-		{"smtp alias", upn, http.StatusOK, `{"mail":"j.doe@example.com","proxyAddresses":["SMTP:j.doe@example.com","smtp:john@example.com"]}`, true},
-		{"other mailbox", upn, http.StatusOK, `{"mail":"bob@example.com","userPrincipalName":"bob@example.org","proxyAddresses":["SMTP:bob@example.com"]}`, false},
-		{"forbidden", upn, http.StatusForbidden, `{"error":{"code":"Authorization_RequestDenied"}}`, false},
-		{"email claim differs", map[string]any{"email": "other@example.com", "tid": "org-tenant-id"}, http.StatusOK, `{"mail":"john@example.com"}`, false},
+		{"mail", NewGraphMailManager},
+		{"mail write", NewGraphMailWriteManager},
+		{"teams", NewGraphManager},
+		{"contacts", NewGraphContactsManager},
 	} {
-		t.Run(tc.name, func(t *testing.T) {
-			require := require.New(t)
-			assert := assert.New(t)
-			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				assert.Equal("/me", r.URL.Path, "path")
-				assert.Equal("Bearer new-access", r.Header.Get("Authorization"), "bearer")
-				w.WriteHeader(tc.status)
-				_, _ = w.Write([]byte(tc.body))
-			}))
-			t.Cleanup(srv.Close)
-			m := NewGraphMailManager("test-client", "common", "", t.TempDir(), slog.Default())
-			m.graphURL = srv.URL
-			m.verifyIDTokenFn = testVerifyFn
-			m.browserFlowFn = func(_ context.Context, _ string, _ []string) (*oauth2.Token, string, error) {
-				tok := (&oauth2.Token{AccessToken: "new-access", TokenType: "Bearer"}).
-					WithExtra(map[string]any{"id_token": makeIDToken(t, tc.claims)})
-				return tok, "test-nonce", nil
-			}
+		t.Run(product.name, func(t *testing.T) {
+			for _, tc := range []struct {
+				name                  string
+				claims                map[string]any
+				status                int
+				body                  string
+				saved                 bool
+				invalid, missingToken bool
+			}{
+				{name: "mail", claims: upn, status: http.StatusOK, body: `{"mail":"John@example.com","userPrincipalName":"jdoe@example.org"}`, saved: true},
+				{name: "smtp alias", claims: upn, status: http.StatusOK, body: `{"mail":"j.doe@example.com","proxyAddresses":["SMTP:j.doe@example.com","smtp:JOHN@example.com"]}`, saved: true},
+				{name: "primary email versus alias", claims: primary, status: http.StatusOK, body: `{"mail":"j.doe@example.com","proxyAddresses":["SMTP:j.doe@example.com","smtp:john@example.com"]}`, saved: true},
+				{name: "absent identity fields", claims: absent, status: http.StatusOK, body: `{"mail":"john@example.com"}`, saved: true},
+				{name: "other mailbox", claims: upn, status: http.StatusOK, body: `{"mail":"bob@example.com","userPrincipalName":"bob@example.org","proxyAddresses":["SMTP:bob@example.com"]}`},
+				{name: "other primary email", claims: primary, status: http.StatusOK, body: `{"mail":"bob@example.com"}`},
+				{name: "absent identity and other mailbox", claims: absent, status: http.StatusOK, body: `{"mail":"bob@example.com"}`},
+				{name: "non smtp proxy", claims: primary, status: http.StatusOK, body: `{"proxyAddresses":["SIP:john@example.com"]}`},
+				{name: "forbidden", claims: upn, status: http.StatusForbidden, body: `{"error":{"code":"Authorization_RequestDenied"}}`},
+				{name: "absent identity and forbidden", claims: absent, status: http.StatusForbidden, body: `{}`},
+				{name: "invalid token", claims: absent, status: http.StatusOK, body: `{"mail":"john@example.com"}`, invalid: true},
+				{name: "missing token", status: http.StatusOK, body: `{"mail":"john@example.com"}`, missingToken: true},
+			} {
+				t.Run(tc.name, func(t *testing.T) {
+					var calls atomic.Int32
+					srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+						calls.Add(1)
+						assert.Equal(t, "/me", r.URL.Path)
+						assert.Equal(t, "mail,userPrincipalName,proxyAddresses", r.URL.Query().Get("$select"))
+						assert.Equal(t, "Bearer new-access", r.Header.Get("Authorization"))
+						w.WriteHeader(tc.status)
+						_, _ = w.Write([]byte(tc.body))
+					}))
+					t.Cleanup(srv.Close)
+					m := product.newManager("test-client", "common", "", t.TempDir(), slog.Default())
+					m.graphURL = srv.URL
+					m.verifyIDTokenFn = testVerifyFn
+					invalid := errors.New("invalid ID token signature or nonce")
+					if tc.invalid {
+						m.verifyIDTokenFn = func(context.Context, string) (*idTokenClaims, error) {
+							return &idTokenClaims{Email: "john@example.com"}, invalid
+						}
+					}
+					m.browserFlowFn = func(_ context.Context, _ string, scopes []string) (*oauth2.Token, string, error) {
+						assert.Contains(t, scopes, scopeProfile)
+						tok := &oauth2.Token{AccessToken: "new-access", RefreshToken: "new-refresh", TokenType: "Bearer"}
+						if !tc.missingToken {
+							tok = tok.WithExtra(map[string]any{"id_token": makeScopedIDToken(t, tc.claims, scopes)})
+						}
+						return tok, "test-nonce", nil
+					}
+					old := &oauth2.Token{AccessToken: "old-access", RefreshToken: "old-refresh", TokenType: "Bearer"}
+					require.NoError(t, m.saveToken("john@example.com", old, m.scopes, "old-tenant"))
+					before, err := os.ReadFile(m.TokenPath("john@example.com"))
+					require.NoError(t, err)
 
-			err := m.Authorize(t.Context(), "john@example.com")
-			if tc.saved {
-				require.NoError(err)
-			} else {
-				require.Error(err)
-				var mismatch *TokenMismatchError
-				require.ErrorAs(err, &mismatch)
+					err = m.Authorize(t.Context(), "john@example.com")
+					if tc.saved {
+						require.NoError(t, err)
+						tf, err := m.loadTokenFile("john@example.com")
+						require.NoError(t, err)
+						assert.Equal(t, "new-access", tf.AccessToken)
+						assert.Equal(t, "new-refresh", tf.RefreshToken)
+						assert.Equal(t, "org-tenant-id", tf.TenantID)
+					} else {
+						require.Error(t, err)
+						if tc.invalid {
+							assert.ErrorIs(t, err, invalid)
+						} else if !tc.missingToken {
+							assert.Contains(t, err.Error(), "sign in to the account that owns john@example.com")
+							if tc.claims["email"] != nil || tc.claims["preferred_username"] != nil {
+								var mismatch *TokenMismatchError
+								assert.ErrorAs(t, err, &mismatch)
+							}
+						}
+						got, err := os.ReadFile(m.TokenPath("john@example.com"))
+						require.NoError(t, err)
+						assert.Equal(t, before, got, "existing credentials preserved")
+					}
+					wantCalls := int32(1)
+					if tc.invalid || tc.missingToken {
+						wantCalls = 0
+					}
+					assert.Equal(t, wantCalls, calls.Load())
+				})
 			}
-			assert.Equal(tc.saved, m.HasToken("john@example.com"), "token saved")
 		})
 	}
 }

@@ -2,7 +2,6 @@ package microsoft
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -10,7 +9,6 @@ import (
 	"strings"
 
 	"go.kenn.io/msgvault/internal/msgraph"
-	"go.kenn.io/msgvault/internal/msmail"
 	"golang.org/x/oauth2"
 )
 
@@ -41,14 +39,14 @@ func GraphScopes() []string {
 		scopeGraphChatRead, scopeGraphChannelMessage, scopeGraphTeamReadBasic,
 		scopeGraphChannelBasic, scopeGraphUserRead, scopeGraphUserReadBasic,
 		scopeGraphTeamMemberRead, scopeGraphChannelMemberRead,
-		scopeOfflineAccess, "openid", scopeEmail,
+		scopeOfflineAccess, "openid", scopeEmail, scopeProfile,
 	}
 }
 
 // GraphMailScopes returns the OAuth scopes requested for mailbox ingestion via
 // the Graph API.
 func GraphMailScopes() []string {
-	return []string{scopeGraphMailRead, scopeGraphUserRead, scopeOfflineAccess, "openid", scopeEmail}
+	return []string{scopeGraphMailRead, scopeGraphUserRead, scopeOfflineAccess, "openid", scopeEmail, scopeProfile}
 }
 
 // GraphMailWriteScopes returns the mail scopes plus Mail.ReadWrite, which
@@ -62,7 +60,7 @@ func GraphMailWriteScopes() []string {
 // sync via the Graph API. CardDAV sync can publish at any time, so the write
 // scope is requested at sign-in.
 func GraphContactsScopes() []string {
-	return []string{scopeGraphContactsReadWrite, scopeGraphUserRead, scopeOfflineAccess, "openid", scopeEmail}
+	return []string{scopeGraphContactsReadWrite, scopeGraphUserRead, scopeOfflineAccess, "openid", scopeEmail, scopeProfile}
 }
 
 // GraphManager is a sibling of Manager that runs the same interactive browser
@@ -142,7 +140,7 @@ func newGraphManager(clientID, tenantID, redirectURI, tokensDir string, logger *
 		redirectURI: redirectURI,
 		tokensDir:   tokensDir,
 		logger:      logger,
-		graphURL:    msmail.GraphBaseURL,
+		graphURL:    msgraph.GraphBaseURL,
 	}
 }
 
@@ -188,9 +186,11 @@ func (m *GraphManager) Authorize(ctx context.Context, email string) error {
 		return err
 	}
 	_, claims, err := d.resolveTokenEmail(ctx, email, token, nonce)
-	var mismatch *TokenMismatchError
-	if errors.As(err, &mismatch) && claims.Email == "" {
-		err = m.confirmMailbox(ctx, email, token.AccessToken, mismatch)
+	if err != nil && claims != nil {
+		err = m.confirmMailbox(ctx, email, token.AccessToken, err)
+		if err != nil {
+			return fmt.Errorf("%w; run '%s' again and sign in to the account that owns %s", err, fmt.Sprintf(m.reauthCmd, email), email)
+		}
 	}
 	if err != nil {
 		return err
@@ -204,7 +204,7 @@ func (m *GraphManager) Authorize(ctx context.Context, email string) error {
 
 // confirmMailbox accepts a sign-in name that differs from email when the
 // signed-in user's Graph profile lists email as its mailbox or an alias.
-func (m *GraphManager) confirmMailbox(ctx context.Context, email, accessToken string, mismatch *TokenMismatchError) error {
+func (m *GraphManager) confirmMailbox(ctx context.Context, email, accessToken string, identityErr error) error {
 	client := msgraph.NewClient(m.graphURL, func(context.Context) (string, error) { return accessToken, nil }, 0)
 	var me struct {
 		Mail              string   `json:"mail"`
@@ -212,7 +212,7 @@ func (m *GraphManager) confirmMailbox(ctx context.Context, email, accessToken st
 		ProxyAddresses    []string `json:"proxyAddresses"`
 	}
 	if err := client.GetJSON(ctx, "/me?$select=mail,userPrincipalName,proxyAddresses", &me); err != nil {
-		return fmt.Errorf("%w; could not confirm the signed-in mailbox: %w", mismatch, err)
+		return fmt.Errorf("%w; could not confirm the signed-in mailbox: %w", identityErr, err)
 	}
 	addrs := []string{me.Mail, me.UserPrincipalName}
 	for _, proxy := range me.ProxyAddresses {
@@ -225,7 +225,7 @@ func (m *GraphManager) confirmMailbox(ctx context.Context, email, accessToken st
 			return nil
 		}
 	}
-	return mismatch
+	return identityErr
 }
 
 // TokenSource loads the persisted Graph token and returns a function yielding a
