@@ -1,5 +1,5 @@
 ---
-last_edited: "2026-10-07"
+last_edited: "2026-10-08"
 title: CLI Reference
 description: Complete command reference for all msgvault commands.
 ---
@@ -1019,6 +1019,50 @@ cancellation failures fail the sync and preserve the prior successful cursor.
 | `--probe` | `false` | Print the MCP tool inventory and a sample result instead of syncing |
 
 See [Meeting Transcripts](/docs/usage/meetings/) for setup and what gets stored.
+
+---
+
+## add-twenty
+
+Validate read access and register a configured Twenty call recording source.
+
+```bash
+msgvault add-twenty [identifier]
+```
+
+The daemon-host `[[twenty]]` entry requires `account_email`, `base_url`, and
+`api_key`. One entry permits omitting the identifier. Registration checks
+recording, calendar, and participant access before creating the source.
+
+---
+
+## sync-twenty
+
+Archive summaries and diarized transcripts from Twenty call recordings.
+
+```bash
+msgvault sync-twenty [identifier]
+msgvault sync-twenty work --after 2026-01-01 --limit 10
+msgvault sync-twenty work --full
+msgvault sync-twenty work --probe
+```
+
+Each run reads recordings updated since the last successful run, plus a
+five-minute overlap; late summaries and transcripts update the existing meeting. Recordings that can't be
+archived are skipped and reported instead of failing the run. With no identifier, sync visits all configured sources.
+API failures fail the run while retaining previously committed meetings.
+
+| Flag | Default | Description |
+|---|---|---|
+| `--limit` | `0` | Maximum eligible meetings processed (`0` = unlimited); stopped scans report partial coverage, and the next run without `--after` continues, including a stopped `--full` rescan |
+| `--after` | — | Inclusive UTC occurrence-date lower bound (`YYYY-MM-DD`) applied after reading; leaves the sync position unchanged |
+| `--full` | `false` | Rescan every recording and refresh archive projections and attribution; resumes an unfinished limited rescan instead of restarting it |
+| `--probe` | `false` | Check read access without printing content or writing the archive; requires one source |
+| `--build-cache` | `false` | Request a cache build after manual sync |
+| `--no-build-cache` | `false` | Skip the cache build after manual sync |
+
+See [Meeting Transcripts](/docs/usage/meetings/#twenty-call-recordings) for setup,
+stored evidence, duration fallbacks, and retained source deletions.
 
 ---
 
