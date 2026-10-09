@@ -13067,8 +13067,6 @@ components:
           type: boolean
         plain_http_warning:
           type: boolean
-        platform:
-          type: string
       required:
         - auth_mode
         - https

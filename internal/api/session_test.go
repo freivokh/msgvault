@@ -8,7 +8,6 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"runtime"
 	"testing"
 	"time"
 
@@ -185,7 +184,6 @@ func TestSessionBootstrapModes(t *testing.T) {
 		status := decodeSessionStatus(t, resp)
 		assertions.Equal(AuthModeLoopback, status.AuthMode)
 		assertions.Empty(status.CSRFToken)
-		assertions.Equal(runtime.GOOS, status.Platform)
 		assertions.Equal("no-store", resp.Header().Get("Cache-Control"))
 	})
 
@@ -241,14 +239,12 @@ func TestSessionBootstrapModes(t *testing.T) {
 	})
 
 	t.Run("unauthenticated remote", func(t *testing.T) {
-		assertions := assert.New(t)
 		srv := newSessionTestServer(t, testSessionAPIKey)
 		resp := performSessionRequest(t, srv, http.MethodGet, sessionPath, nil, nil, false)
 		require.Equal(t, http.StatusOK, resp.Code, resp.Body.String())
 		status := decodeSessionStatus(t, resp)
-		assertions.Equal(AuthModeRequired, status.AuthMode)
-		assertions.Empty(status.CSRFToken)
-		assertions.Empty(status.Platform, "the daemon's OS stays hidden until the browser signs in")
+		assert.Equal(t, AuthModeRequired, status.AuthMode)
+		assert.Empty(t, status.CSRFToken)
 	})
 }
 

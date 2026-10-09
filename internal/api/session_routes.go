@@ -4,7 +4,6 @@ import (
 	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"net/http"
-	"runtime"
 	"time"
 
 	"github.com/danielgtaylor/huma/v2"
@@ -44,9 +43,6 @@ type SessionStatus struct {
 	CSRFToken        string   `json:"csrf_token,omitempty"`
 	HTTPS            bool     `json:"https"`
 	PlainHTTPWarning bool     `json:"plain_http_warning"`
-	// Platform is the daemon's GOOS, so the settings page can quote CLI
-	// commands for the shell on the machine that runs msgvault.
-	Platform string `json:"platform,omitempty"`
 }
 
 func (s *Server) registerSessionRoutes(api huma.API) {
@@ -155,16 +151,12 @@ func (s *Server) handleSessionLogout(w http.ResponseWriter, r *http.Request) {
 }
 
 func sessionStatus(mode AuthMode, csrfToken string, https bool) SessionStatus {
-	status := SessionStatus{
+	return SessionStatus{
 		AuthMode:         mode,
 		CSRFToken:        csrfToken,
 		HTTPS:            https,
 		PlainHTTPWarning: !https,
 	}
-	if mode != AuthModeRequired {
-		status.Platform = runtime.GOOS
-	}
-	return status
 }
 
 func requestUsesHTTPS(r *http.Request) bool {

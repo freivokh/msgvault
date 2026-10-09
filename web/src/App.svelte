@@ -149,7 +149,6 @@
       <SettingsWorkspace
         client={session.client}
         plainHTTPWarning={session.status?.plain_http_warning ?? false}
-        platform={session.status?.platform}
         {cardDAVRequest}
         {onCardDAVRequestConsumed}
         {navigationTarget}

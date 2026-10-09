@@ -87,7 +87,6 @@
   let {
     client,
     plainHTTPWarning = false,
-    platform = undefined,
     cardDAVRequest = undefined,
     navigationTarget = undefined,
     category = 'browser',
@@ -97,7 +96,6 @@
   }: {
     client: APIClient;
     plainHTTPWarning?: boolean;
-    platform?: string;
     cardDAVRequest?: CardDAVSettingsRequest;
     navigationTarget?: SettingsNavigationTarget;
     category?: string;
@@ -697,7 +695,6 @@
           <CardDAVSettingsWorkspace
             {client}
             {settings}
-            {platform}
             {cardDAVRequest}
             {onCardDAVRequestConsumed}
             onSettingsRefresh={() => loadSettings(true)}

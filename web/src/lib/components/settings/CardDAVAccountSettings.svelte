@@ -18,13 +18,11 @@
     client,
     values,
     connection = undefined,
-    platform = undefined,
     onSaved = () => undefined,
   }: {
     client: APIClient;
     values: CardDAVAccountValues;
     connection?: string;
-    platform?: string;
     onSaved?: () => void | Promise<void>;
   } = $props();
   const initialValues = untrack(() => values);
@@ -44,9 +42,9 @@
   }
   let baseURL = $state(initialValues.baseURL);
   let username = $state(initialValues.username);
-  const authorizationCommand = $derived(`msgvault carddav authorize-google ${shellQuote(username || 'you@example.com', platform)}${oauthApp ? ` --oauth-app ${shellQuote(oauthApp, platform)}` : ''}`);
-  // Sign-in only: saving stays with this form, so a connection keeps its schedule.
-  const microsoftCommand = $derived(`msgvault carddav authorize-microsoft ${shellQuote(username || 'you@example.com', platform)}`);
+  function authorizationCommand(shell: 'posix' | 'cmd'): string {
+    return `msgvault carddav authorize-${provider} ${shellQuote(username || 'you@example.com', shell)}${google && oauthApp ? ` --oauth-app ${shellQuote(oauthApp, shell)}` : ''}`;
+  }
   let password = $state('');
   let persistedBaseURL = $state(initialValues.baseURL);
   let persistedUsername = $state(initialValues.username);
@@ -234,6 +232,14 @@
   }
 </script>
 
+{#snippet terminalCommands()}
+  <p>POSIX shell</p>
+  <code class="authorization-command">{authorizationCommand('posix')}</code>
+  <p>Command Prompt</p>
+  <p>Start Command Prompt with <code>cmd /d /v:off</code>, then paste:</p>
+  <code class="authorization-command">{authorizationCommand('cmd')}</code>
+{/snippet}
+
 <SettingsSection title="CardDAV account" description="Address-book server this archive syncs contacts with.">
   {#if error}<p class="error" role="alert">{error}</p>{/if}
   {#if status}<p class="status" role="status">{status}</p>{/if}
@@ -281,12 +287,13 @@
       </div>
       <p>Register <code>{window.location.origin}/</code> as an authorized redirect URI in your Google OAuth app. Keep existing permissions checked when granting contacts access.</p>
       <p>Your contacts account and OAuth app can differ from your mail accounts. A matching Google authorization is reused; otherwise, CardDAV stores separate credentials.</p>
-      <details><summary>Authorize from {platform === 'windows' ? 'Command Prompt' : 'the terminal'} instead</summary>
-        <code class="authorization-command">{authorizationCommand}</code>
+      <details><summary>Authorize from the terminal instead</summary>
+        {@render terminalCommands()}
         <p>For a remote daemon, copy the authorized token to that host before testing. <a href="https://msgvault.io/docs/usage/people-carddav/#google-contacts" target="_blank" rel="noreferrer">Google Contacts setup</a></p>
       </details>
     {:else if microsoft}
-      <p>Sign in from the terminal before you save: <code class="authorization-command">{microsoftCommand}</code></p>
+      <p>Sign in from the terminal before you save.</p>
+      {@render terminalCommands()}
       <p>Your Microsoft app registration needs the delegated <code>Contacts.ReadWrite</code> permission. <a href="https://msgvault.io/docs/usage/people-carddav/#microsoft-contacts" target="_blank" rel="noreferrer">Microsoft contacts setup</a></p>
     {:else}
       <div class="field">

@@ -55,16 +55,19 @@ describe('CardDAVAccountSettings', () => {
   });
 
   it.each([
-    ['windows', 'Authorize from Command Prompt instead', `msgvault carddav authorize-google "o'brien@example.com" --oauth-app "Work App"`],
-    ['linux', 'Authorize from the terminal instead', `msgvault carddav authorize-google 'o'\\''brien@example.com' --oauth-app 'Work App'`],
-  ])('quotes the terminal sign-in command for a %s daemon', (platform, summary, command) => {
-    const googleValues = { ...values, provider: 'google', oauthApp: 'Work App', username: "o'brien@example.com" };
-    render(CardDAVAccountSettings, { client: createAPIClient(async () => Response.json({})), values: googleValues, platform });
+    ['google', `msgvault carddav authorize-google 'a^b@example.com' --oauth-app 'Work $Budget!'`, 'msgvault carddav authorize-google "a^b@example.com" --oauth-app "Work $Budget!"'],
+    ['microsoft', `msgvault carddav authorize-microsoft 'a^b@example.com'`, 'msgvault carddav authorize-microsoft "a^b@example.com"'],
+  ])('shows labeled commands for both shells for %s', (provider, posixCommand, cmdCommand) => {
+    const oauthValues = { ...values, provider, oauthApp: 'Work $Budget!', username: 'a^b@example.com' };
+    render(CardDAVAccountSettings, { client: createAPIClient(async () => Response.json({})), values: oauthValues });
 
-    expect(screen.getByText(summary)).toBeDefined();
-    expect(screen.getByText(/^msgvault carddav authorize-google/).textContent).toBe(command);
+    expect(screen.getByText('POSIX shell')).toBeDefined();
+    expect(screen.getByText('Command Prompt')).toBeDefined();
+    expect(screen.getByText(posixCommand)).toBeDefined();
+    expect(screen.getByText(cmdCommand)).toBeDefined();
+    expect(screen.getByText('cmd /d /v:off')).toBeDefined();
+    expect(screen.getByText(/Start Command Prompt with/).textContent).toBe('Start Command Prompt with cmd /d /v:off, then paste:');
   });
-
   it('shows Save CardDAV account as the solid blue primary action', () => {
     render(CardDAVAccountSettings, { client: createAPIClient(async () => Response.json({})), values });
 

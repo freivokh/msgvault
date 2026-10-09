@@ -8,6 +8,5 @@ export interface SessionStatus {
   csrf_token?: string;
   https: boolean;
   plain_http_warning: boolean;
-  platform?: string;
   [key: string]: unknown;
 }

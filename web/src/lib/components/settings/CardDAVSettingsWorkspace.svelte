@@ -15,14 +15,12 @@
   let {
     client,
     settings,
-    platform = undefined,
     onSettingsRefresh = () => undefined,
     cardDAVRequest = undefined,
     onCardDAVRequestConsumed = () => undefined
   }: {
     client: APIClient;
     settings: SettingState[];
-    platform?: string;
     onSettingsRefresh?: () => void | Promise<void>;
     cardDAVRequest?: CardDAVSettingsRequest;
     onCardDAVRequestConsumed?: (key: number) => void;
@@ -177,7 +175,6 @@
     <CardDAVConnectionSettings
       {client}
       values={selectedValues}
-      {platform}
       connection={selected}
       orphaned={selectedConnection?.orphaned === true}
       onSaved={accountSaved}
