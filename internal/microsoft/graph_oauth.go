@@ -244,7 +244,7 @@ func (m *GraphManager) TokenSource(ctx context.Context, email string) (func(cont
 	scopes := tf.Scopes
 	if len(scopes) == 0 {
 		scopes = m.scopes
-	} else if missing := missingScopes(scopes, m.scopes); len(missing) > 0 {
+	} else if missing := missingGraphScopes(scopes, m.scopes); len(missing) > 0 {
 		return nil, fmt.Errorf(
 			"token for %s is missing Microsoft Graph scopes %s — run '%s' to re-authorize",
 			email, strings.Join(missing, ", "), fmt.Sprintf(m.reauthCmd, email),
@@ -263,14 +263,13 @@ func (m *GraphManager) TokenSource(ctx context.Context, email string) (func(cont
 	}), nil
 }
 
-// HasScopes reports whether the saved token was granted every scope this
-// manager requests.
+// HasScopes reports whether the saved token has the scopes needed at runtime.
 func (m *GraphManager) HasScopes(email string) (bool, error) {
 	tf, err := m.loadTokenFile(email)
 	if err != nil {
 		return false, err
 	}
-	return len(missingScopes(tf.Scopes, m.scopes)) == 0, nil
+	return len(missingGraphScopes(tf.Scopes, m.scopes)) == 0, nil
 }
 
 // HasToken reports whether a persisted Graph token exists for the account.
@@ -299,13 +298,16 @@ func (m *GraphManager) loadTokenFile(email string) (*tokenFile, error) {
 	return readTokenFile(m.TokenPath(email))
 }
 
-func missingScopes(scopes, want []string) []string {
+func missingGraphScopes(scopes, want []string) []string {
 	have := make(map[string]struct{}, len(scopes))
 	for _, scope := range scopes {
 		have[scope] = struct{}{}
 	}
 	var missing []string
 	for _, scope := range want {
+		if scope == scopeProfile {
+			continue // Profile supplies sign-in claims; existing grants can still sync.
+		}
 		if _, ok := have[scope]; !ok {
 			missing = append(missing, scope)
 		}

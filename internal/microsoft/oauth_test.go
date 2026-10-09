@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -111,12 +112,13 @@ func TestIsPersonalMicrosoftAccount(t *testing.T) {
 }
 
 func TestScopesForEmail(t *testing.T) {
+	assert := assert.New(t)
 	orgScopes := scopesForEmail("user@company.com")
-	assert.Equal(t, ScopeIMAPOrg, orgScopes[0], "org scope")
+	assert.Equal(ScopeIMAPOrg, orgScopes[0], "org scope")
 	personalScopes := scopesForEmail("user@hotmail.com")
-	assert.Equal(t, ScopeIMAPPersonal, personalScopes[0], "personal scope")
-	assert.Contains(t, orgScopes, scopeProfile)
-	assert.Contains(t, personalScopes, scopeProfile)
+	assert.Equal(ScopeIMAPPersonal, personalScopes[0], "personal scope")
+	assert.Contains(orgScopes, scopeProfile)
+	assert.Contains(personalScopes, scopeProfile)
 }
 
 func TestSanitizeEmail(t *testing.T) {
@@ -177,10 +179,10 @@ func makeScopedIDToken(t *testing.T, claims map[string]any, scopes []string) str
 	t.Helper()
 	requested := make(map[string]any, len(claims))
 	for key, value := range claims {
-		if key == "preferred_username" && len(missingScopes(scopes, []string{scopeProfile})) > 0 {
+		if key == "preferred_username" && !slices.Contains(scopes, scopeProfile) {
 			continue
 		}
-		if key == "email" && len(missingScopes(scopes, []string{scopeEmail})) > 0 {
+		if key == "email" && !slices.Contains(scopes, scopeEmail) {
 			continue
 		}
 		requested[key] = value

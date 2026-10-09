@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -214,6 +215,57 @@ func TestGraphManager_TokenSource_NoIMAPValidation(t *testing.T) {
 	ts, err := m.TokenSource(t.Context(), "user@company.com")
 	require.NoError(t, err)
 	require.NotNil(t, ts, "TokenSource returned nil")
+}
+
+func TestGraphManager_ExistingGrantWithoutProfile(t *testing.T) {
+	for _, product := range []struct {
+		name       string
+		newManager func(string, string, string, string, *slog.Logger) *GraphManager
+		permission string
+	}{
+		{"mail", NewGraphMailManager, scopeGraphMailRead},
+		{"mail write", NewGraphMailWriteManager, scopeGraphMailReadWrite},
+		{"teams", NewGraphManager, scopeGraphChatRead},
+		{"contacts", NewGraphContactsManager, scopeGraphContactsReadWrite},
+	} {
+		t.Run(product.name, func(t *testing.T) {
+			assert := assert.New(t)
+			require := require.New(t)
+			m := product.newManager("test-client", "common", "", t.TempDir(), nil)
+			granted := slices.DeleteFunc(slices.Clone(m.scopes), func(scope string) bool { return scope == scopeProfile })
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				assert.NoError(r.ParseForm())
+				assert.Equal("refresh_token", r.Form.Get("grant_type"))
+				assert.Equal("old-refresh", r.Form.Get("refresh_token"))
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(`{"access_token":"fresh-access","token_type":"Bearer","expires_in":3600,"refresh_token":"fresh-refresh"}`))
+			}))
+			t.Cleanup(srv.Close)
+			m.authorityURL = srv.URL
+			token := &oauth2.Token{AccessToken: "old-access", RefreshToken: "old-refresh", TokenType: "Bearer", Expiry: time.Now().Add(-time.Hour)}
+			require.NoError(m.saveToken("user@example.com", token, granted, "org-tenant-id"))
+			ok, err := m.HasScopes("user@example.com")
+			require.NoError(err)
+			assert.True(ok)
+			source, err := m.TokenSource(t.Context(), "user@example.com")
+			require.NoError(err)
+			access, err := source(t.Context())
+			require.NoError(err)
+			assert.Equal("fresh-access", access)
+			saved, err := m.loadTokenFile("user@example.com")
+			require.NoError(err)
+			assert.ElementsMatch(granted, saved.Scopes)
+			assert.Equal("fresh-refresh", saved.RefreshToken)
+
+			missingPermission := slices.DeleteFunc(slices.Clone(granted), func(scope string) bool { return scope == product.permission })
+			require.NoError(m.saveToken("user@example.com", token, missingPermission, "org-tenant-id"))
+			ok, err = m.HasScopes("user@example.com")
+			require.NoError(err)
+			assert.False(ok)
+			_, err = m.TokenSource(t.Context(), "user@example.com")
+			require.ErrorContains(err, product.permission)
+		})
+	}
 }
 
 func TestGraphManager_TokenSource_StaleGraphScopesReturnsError(t *testing.T) {
