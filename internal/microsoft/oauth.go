@@ -192,7 +192,7 @@ func (m *Manager) Authorize(ctx context.Context, email string) error {
 	}
 	_, claims, err := m.resolveTokenEmail(ctx, email, token, nonce)
 	if err != nil {
-		return signInHint(email, claims, err)
+		return m.signInHint(email, claims, err)
 	}
 
 	// Correct IMAP scope if the domain-based guess was wrong.
@@ -215,7 +215,7 @@ func (m *Manager) Authorize(ctx context.Context, email string) error {
 			}
 			_, claims, err = m.resolveTokenEmail(ctx, email, token, nonce)
 			if err != nil {
-				return signInHint(email, claims, err)
+				return m.signInHint(email, claims, err)
 			}
 		}
 	}
@@ -229,13 +229,16 @@ func (m *Manager) Authorize(ctx context.Context, email string) error {
 
 // signInHint explains a mismatch that came from the sign-in name, since that
 // name may legitimately differ from the mailbox.
-func signInHint(email string, claims *idTokenClaims, err error) error {
+func (m *Manager) signInHint(email string, claims *idTokenClaims, err error) error {
 	var mismatch *TokenMismatchError
 	if !errors.As(err, &mismatch) || claims.Email != "" {
 		return err
 	}
-	return fmt.Errorf("%w; the account that signed in (%s) differs from %s. Sign in as %s, or if %s is your own sign-in name for that mailbox, pass it with --sign-in",
-		err, mismatch.Actual, email, email, mismatch.Actual)
+	if m.signInName != "" {
+		return fmt.Errorf("%w; that account is not the --sign-in name %s either", err, m.signInName)
+	}
+	return fmt.Errorf("%w; sign in as %s, or if %s is your own sign-in name for that mailbox, pass it with --sign-in",
+		err, email, mismatch.Actual)
 }
 
 // doBrowserFlow dispatches to browserFlowFn (test hook), the device-code flow,

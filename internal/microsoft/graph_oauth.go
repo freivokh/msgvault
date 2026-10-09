@@ -196,7 +196,7 @@ func (m *GraphManager) confirmMailbox(ctx context.Context, email, accessToken st
 		ProxyAddresses    []string `json:"proxyAddresses"`
 	}
 	if err := client.GetJSON(ctx, "/me?$select=mail,userPrincipalName,proxyAddresses", &me); err != nil {
-		return fmt.Errorf("%w; confirm the signed-in mailbox: %w", mismatch, err)
+		return fmt.Errorf("%w; could not confirm the signed-in mailbox: %w", mismatch, err)
 	}
 	addrs := []string{me.Mail, me.UserPrincipalName}
 	for _, proxy := range me.ProxyAddresses {

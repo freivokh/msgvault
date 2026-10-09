@@ -317,20 +317,30 @@ func upnBrowserFlow(t *testing.T, upn string, hint *string) func(context.Context
 }
 
 func TestAuthorize_OtherUPNKeepsExistingToken(t *testing.T) {
-	require := require.New(t)
-	assert := assert.New(t)
-	m := &Manager{clientID: "test-client", tenantID: "common", tokensDir: t.TempDir(), logger: slog.Default(), verifyIDTokenFn: testVerifyFn}
-	old := &oauth2.Token{AccessToken: "old-access", RefreshToken: "old-refresh", TokenType: "Bearer"}
-	require.NoError(m.saveToken("alice@example.com", old, scopesForEmail("alice@example.com"), "org-tenant-id"))
-	m.browserFlowFn = upnBrowserFlow(t, "bob@example.com", nil)
+	for _, tc := range []struct {
+		name, signIn, hint string
+	}{
+		{name: "no sign-in name", hint: "sign in as alice@example.com, or if bob@example.com is your own sign-in name for that mailbox, pass it with --sign-in"},
+		{name: "other sign-in name", signIn: "alice@example.org", hint: "that account is not the --sign-in name alice@example.org either"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			require := require.New(t)
+			assert := assert.New(t)
+			m := &Manager{clientID: "test-client", tenantID: "common", tokensDir: t.TempDir(), logger: slog.Default(), verifyIDTokenFn: testVerifyFn}
+			m.UseSignInName(tc.signIn)
+			old := &oauth2.Token{AccessToken: "old-access", RefreshToken: "old-refresh", TokenType: "Bearer"}
+			require.NoError(m.saveToken("alice@example.com", old, scopesForEmail("alice@example.com"), "org-tenant-id"))
+			m.browserFlowFn = upnBrowserFlow(t, "bob@example.com", nil)
 
-	err := m.Authorize(t.Context(), "alice@example.com")
-	mismatch := &TokenMismatchError{}
-	require.ErrorAs(err, &mismatch)
-	assert.Contains(err.Error(), "if bob@example.com is your own sign-in name for that mailbox, pass it with --sign-in")
-	tf, err := m.loadTokenFile("alice@example.com")
-	require.NoError(err)
-	assert.Equal("old-access", tf.AccessToken, "existing token untouched")
+			err := m.Authorize(t.Context(), "alice@example.com")
+			mismatch := &TokenMismatchError{}
+			require.ErrorAs(err, &mismatch)
+			assert.Contains(err.Error(), tc.hint)
+			tf, err := m.loadTokenFile("alice@example.com")
+			require.NoError(err)
+			assert.Equal("old-access", tf.AccessToken, "existing token untouched")
+		})
+	}
 }
 
 func TestAuthorize_SignInNameAcceptsUPN(t *testing.T) {
