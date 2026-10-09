@@ -68,6 +68,7 @@ describe('CardDAVAccountSettings', () => {
     expect(screen.getByText('cmd /d /v:off')).toBeDefined();
     expect(screen.getByText(/Start Command Prompt with/).textContent).toBe('Start Command Prompt with cmd /d /v:off, then paste:');
   });
+
   it('shows Save CardDAV account as the solid blue primary action', () => {
     render(CardDAVAccountSettings, { client: createAPIClient(async () => Response.json({})), values });
 
