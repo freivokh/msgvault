@@ -6160,17 +6160,10 @@ type AttachmentRef struct {
 	SkipReason attachmentpolicy.SkipReason
 }
 
-// replaceMessageAttachmentsWhere atomically reconciles a message's attachment
+// replaceMessageAttachmentsWhereContext atomically reconciles a message's attachment
 // rows matching deleteWhere with refs. Retained source-part keys keep their row
 // IDs so resync does not invalidate cached file listings. Refs with an empty
 // StoragePath (and, when requireHash is set, an empty ContentHash) are skipped.
-func (s *Store) replaceMessageAttachmentsWhere(
-	messageID int64, deleteWhere string, requireHash bool, refs []AttachmentRef, deleteArgs ...any,
-) error {
-	return s.replaceMessageAttachmentsWhereContext(context.Background(), messageID, deleteWhere, requireHash, refs, deleteArgs...)
-}
-
-// replaceMessageAttachmentsWhereContext honors cancellation during replaceMessageAttachmentsWhere.
 func (s *Store) replaceMessageAttachmentsWhereContext(ctx context.Context,
 	messageID int64, deleteWhere string, requireHash bool, refs []AttachmentRef, deleteArgs ...any,
 ) error {
