@@ -110,6 +110,7 @@ func (s *Store) fenceSyncGenerationTx(
 		return fmt.Errorf("fence sync run %d for source %d: %w",
 			s.syncGeneration.runID, s.syncGeneration.sourceID, err)
 	}
+	tx.syncGenerationFenced = true
 	return nil
 }
 
