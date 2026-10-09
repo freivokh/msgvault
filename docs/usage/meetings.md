@@ -15,7 +15,7 @@ emails connect meetings to the people you already know in msgvault.
 |---|---|---|
 | [Twilio](#twilio) (unreleased) | Account auth token or API key | Recordings and transcripts Twilio still retains |
 | [Granola](#granola) | API key | Requires access to Granola's public API |
-| [Notion AI Meeting Notes](#notion-ai-meeting-notes) | Notion integration token | At most 50 attendee-visible meetings per discovery query |
+| [Notion AI Meeting Notes](#notion-ai-meeting-notes) | Meeting PAT or integration, optional users integration | At most 50 attendee-visible meetings per discovery query |
 | [Plaud](#plaud) | Browser authorization to its hosted MCP server | Requires Cloud Sync and existing Plaud transcription |
 | [Circleback](#circleback) | Browser authorization to its MCP server | Older note edits require a full refresh |
 | [Muesli](#muesli) | Local database on the same Mac | msgvault must run on the Mac where Muesli records |
@@ -428,16 +428,20 @@ a workspace-wide export.
 
 ### Configure and register
 
-Create a Notion integration with AI Meeting Notes and Read Content access.
-Grant User Information access if you want attendee IDs resolved to verified
-emails and relationship participants. Without it, meetings still sync, but
-attendees remain display-only names or IDs.
+Use a personal access token (PAT) or integration with AI Meeting Notes and
+Read Content access for meeting content. PATs cannot list workspace users or
+retrieve other users, and have no User Information capability toggle.
+For attendee emails, create an internal integration in the same workspace
+with **Read user information including email addresses**, then supply its token
+as `users_token`. Keep the meeting PAT so discovery
+continues to use the meeting owner's attendee visibility.
 
 ```toml
 [[notion_meetings]]
 identifier = "notion-personal"
 account_email = "you@example.com"
 token = "ntn_..."
+users_token = "ntn_..."          # optional workspace users integration
 schedule = "15 */6 * * *"         # optional daemon schedule
 enabled = true
 ```
@@ -452,7 +456,26 @@ msgvault sync-notion-meetings notion-personal --probe
 
 Both commands print capability and result-count diagnostics without printing
 meeting titles, notes, transcripts, attendee details, block IDs, page URLs, or
-the token.
+the tokens. Probe output checks the optional users token on one sampled attendee
+and reports whether that attendee has a verified email.
+
+### Notion attendee emails
+
+The users token retrieves known attendee IDs directly, including workspace
+members and guests. Only users with `person.email_verified = true` and a usable
+email become anchored participants. Healthy unverified users stay display-only.
+
+Each optional user lookup has a 60-second timeout, including retries. Healthy
+lookups can continue throughout the sync. Successful responses and missing IDs
+are cached for the run.
+Invalid credentials, missing User Information capability, provider retry
+exhaustion, and transport failures stop further uncached lookups for that sync.
+Previously verified attendees survive failed or skipped lookups. The next sync
+retries with fresh state. People without a Notion account can't be resolved.
+
+After adding a users token, run `msgvault sync-notion-meetings <identifier>`
+to update participants on existing visible meetings. The 50-meeting discovery
+window still applies.
 
 ### Sync and discovery limit
 
@@ -501,7 +524,9 @@ become participant rows. Unknown IDs and names remain display-only evidence.
 
 If registration reports invalid token, Meeting Notes access, or Read Content
 errors, correct that integration capability and rerun `add-notion-meetings`.
-User Information errors are non-fatal. Remove the archive source with:
+For attendee emails, correct the separate users integration and its Read user
+information including email addresses capability. A PAT cannot resolve other
+users. Optional lookup failures preserve meeting content. Remove the source with:
 
 ```bash
 msgvault remove-account notion-personal --type notion_meetings --yes

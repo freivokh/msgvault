@@ -1900,11 +1900,12 @@ func (s PlaudSource) EffectiveAccountEmail() (string, error) {
 }
 
 // NotionMeetingsSource is one configured Notion AI Meeting Notes identity.
-// Authentication uses a read-only integration token stored in config.toml.
+// Meeting access and optional workspace user access use separate credentials.
 type NotionMeetingsSource struct {
 	Identifier   string `toml:"identifier"`
 	AccountEmail string `toml:"account_email"`
 	Token        string `toml:"token"`
+	UsersToken   string `toml:"users_token"`
 	Schedule     string `toml:"schedule"`
 	Enabled      bool   `toml:"enabled"`
 }

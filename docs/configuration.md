@@ -1325,15 +1325,18 @@ opt-out flag.
 ### Notion AI Meeting Notes Sources
 
 Notion meeting sync uses one top-level `[[notion_meetings]]` entry per Notion
-identity. The token must belong to a read-only integration with AI Meeting
-Notes access and Read Content access. User Information access is optional; it
-is required only to resolve attendee IDs to verified email addresses.
+identity. The meeting token needs AI Meeting Notes and Read Content access.
+A personal access token (PAT) can read its user's meetings but cannot list users
+or retrieve other users. To resolve Notion attendee IDs, configure a separate
+internal integration with **Read user information including email addresses**.
+The integration must belong to the same workspace.
 
 ```toml
 [[notion_meetings]]
 identifier = "notion-personal"      # stable source label; defaults to "default" for one entry
 account_email = "you@example.com"   # required primary account identity
-token = "ntn_..."                   # Notion integration token; keep this file private
+token = "ntn_..."                   # meeting token; keep this file private
+users_token = "ntn_..."             # optional workspace users integration token
 schedule = "15 */6 * * *"           # optional 5-field cron, no seconds
 enabled = true
 ```
@@ -1342,9 +1345,15 @@ enabled = true
 |---|---|---|
 | `identifier` | `default` (single entry) | Source name used by commands and scheduler logs |
 | `account_email` | (required) | Normalized primary identity for relationships; it is not assumed to be the meeting organizer |
-| `token` | (required) | Read-only Notion integration token |
+| `token` | (required) | Meeting token; PAT or integration with Meeting Notes and Read Content access |
+| `users_token` | — | Optional workspace integration token with Read user information including email addresses |
 | `schedule` | — | Cron expression used by `msgvault serve` |
 | `enabled` | `false` | Whether the source is daemon-scheduled |
+
+Manual and scheduled sync use the same optional users token from config.
+Token values stay out of diagnostics and archived evidence. See
+[Notion attendee emails](https://msgvault.io/docs/usage/meetings/#notion-attendee-emails)
+for lookup timeouts, failures, and retries.
 
 Run `msgvault add-notion-meetings <identifier>` to validate access and register
 the source before enabling a schedule. Removing the source prevents the
