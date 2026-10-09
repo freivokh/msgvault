@@ -180,12 +180,12 @@ func TestGraphManager_Authorize_ConfirmsMailboxViaProfile(t *testing.T) {
 					} else {
 						require.Error(t, err)
 						if tc.invalid {
-							assert.ErrorIs(t, err, invalid)
+							require.ErrorIs(t, err, invalid)
 						} else if !tc.missingToken {
 							assert.Contains(t, err.Error(), "sign in to the account that owns john@example.com")
 							if tc.claims["email"] != nil || tc.claims["preferred_username"] != nil {
 								var mismatch *TokenMismatchError
-								assert.ErrorAs(t, err, &mismatch)
+								require.ErrorAs(t, err, &mismatch)
 							}
 						}
 						got, err := os.ReadFile(m.TokenPath("john@example.com"))
