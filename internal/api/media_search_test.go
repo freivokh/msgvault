@@ -605,7 +605,7 @@ func TestMediaSearchSharedSourceAllowedInputs(t *testing.T) {
 		partial           bool
 	}{
 		{"caption A only", 0, 1, true}, {"neither caption", 0, 1, true}, {"caption B", 1, 1, true},
-		{"generated", 2, 0, false}, {"generated nohit", 0, 0, false}, {"partial generated", 0, 0, true}, {"late caption", 0, 2, true}, {"hide unmatched", 0, 0, true}, {"hide selected", 0, 1, true}, {"no-hit bytes", 0, 1, true},
+		{"generated", 2, 0, false}, {"generated nohit", 0, 0, false}, {"partial generated", 0, 0, true}, {"degraded provenance", 0, 0, true}, {"late caption", 0, 2, true}, {"hide unmatched", 0, 0, true}, {"hide selected", 0, 1, true}, {"no-hit bytes", 0, 1, true},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			assert := assert.New(t)
@@ -619,11 +619,14 @@ func TestMediaSearchSharedSourceAllowedInputs(t *testing.T) {
 			second := f.audio(t, secondID, "second-input", "", "delivery-second-input", &store.BeeperMediaResult{VaultUID: "vault", DocbankSourceID: first.sourceID, ContentVersionID: first.contentVersionID})
 			source := docbankmedia.SearchMediaSource{SourceID: first.sourceID, SourceVersionID: "version", ContentVersionID: first.contentVersionID}
 			selection := docbankmedia.SearchMediaSelection{SearchMediaSource: source, Origin: "supplied", SuppliedInputID: second.suppliedInputID, Completeness: "complete"}
-			if strings.HasPrefix(test.name, "generated") || test.name == "partial generated" {
+			if strings.HasPrefix(test.name, "generated") || test.name == "partial generated" || test.name == "degraded provenance" {
 				selection.Origin, selection.SuppliedInputID = "generated", ""
 			}
 			if test.name == "partial generated" {
 				selection.Completeness = "partial"
+			}
+			if test.name == "degraded provenance" {
+				selection.Completeness = "degraded_provenance"
 			}
 			f.report.MediaSelections = []docbankmedia.SearchMediaSelection{selection}
 			f.report.Coverage = docbankmedia.SearchCoverage{State: "complete", ScopedDocuments: 1, CompleteDocuments: 1}
@@ -658,6 +661,40 @@ func TestMediaSearchSharedSourceAllowedInputs(t *testing.T) {
 			if test.name == "caption B" {
 				assert.Equal(second.messageID, response.Results[0].MessageID)
 			}
+		})
+	}
+}
+
+func TestMediaSearchSharedSourceInputLimit(t *testing.T) {
+	for _, count := range []int{64, 65} {
+		t.Run(strconv.Itoa(count), func(t *testing.T) {
+			f := newMediaSearchFixture(t)
+			f.transcripts["shared"] = "caption 0"
+			first := f.retained(t, "shared")
+			inputs := []string{first.suppliedInputID}
+			for i := 1; i < count; i++ {
+				id := fmt.Sprintf("caption-%d", i)
+				f.transcripts[id] = id
+				f.sameAudio[id] = "shared"
+				seed := f.audio(t, f.message(t, id), id, "", "delivery-"+id, &store.BeeperMediaResult{VaultUID: "vault", DocbankSourceID: first.sourceID, ContentVersionID: first.contentVersionID})
+				inputs = append(inputs, seed.suppliedInputID)
+			}
+			// A repeated caption on another occurrence uses the same allowed input.
+			f.transcripts["duplicate"] = "caption 0"
+			f.sameAudio["duplicate"] = "shared"
+			f.audio(t, f.message(t, "duplicate"), "duplicate", "", "delivery-shared", &store.BeeperMediaResult{VaultUID: "vault", DocbankSourceID: first.sourceID, ContentVersionID: first.contentVersionID})
+			status, _, raw := searchMediaFor(t, f.server(true), "q=words")
+			if count == 65 {
+				require.Equal(t, http.StatusBadRequest, status, raw)
+				assert.Contains(t, raw, "media_search_scope_limit")
+				assert.Contains(t, raw, "64 distinct current captions per recording source")
+				assert.Empty(t, f.requests)
+				return
+			}
+			require.Equal(t, http.StatusOK, status, raw)
+			require.Len(t, f.requests, 1)
+			require.Len(t, f.requests[0].MediaSources, 1)
+			assert.ElementsMatch(t, inputs, f.requests[0].MediaSources[0].SuppliedInputIDs)
 		})
 	}
 }
