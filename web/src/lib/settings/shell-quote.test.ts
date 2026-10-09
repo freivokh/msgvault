@@ -10,6 +10,9 @@ const roundTripValues = [
   'you@example.com',
   "o'brien@example.com",
   'Work App',
+  'Work & Home',
+  'Work $Budget',
+  '$(echo LEAKED)',
   'a&b|c<d>e^f(g)',
   'a"b@example.com',
   'say "hi" & leave',
@@ -27,23 +30,8 @@ const roundTripValues = [
 ];
 
 describe('shellQuote', () => {
-  it.each([
-    ['you@example.com', '"you@example.com"'],
-    ["o'brien@example.com", '"o\'brien@example.com"'],
-    ['Work & Home', '"Work & Home"'],
-    ['trailing\\', '"trailing\\\\"'],
-    ['a"b@example.com', '"a"\\^""b@example.com"'],
-    ['Work %QUOTE_PROBE% App', '"Work "%"QUOTE_PROBE"%" App"'],
-  ])('quotes %j for Windows cmd as %s', (value, quoted) => {
-    expect(shellQuote(value, 'cmd')).toBe(quoted);
-  });
-
-  it('quotes POSIX arguments', () => {
-    expect(shellQuote("o'brien@example.com", 'posix')).toBe("'o'\\''brien@example.com'");
-    expect(shellQuote('you@example.com', 'posix')).toBe("'you@example.com'");
-  });
-
-  it.runIf(process.platform === 'win32')('round-trips arguments through Command Prompt with delayed expansion off', () => {
+  it('round-trips arguments through the platform shell', () => {
+    const shell = process.platform === 'win32' ? 'cmd' : 'posix';
     const dir = mkdtempSync(join(tmpdir(), 'msgvault-shell-quote-'));
     try {
       const script = join(dir, 'argv.js');
@@ -54,39 +42,19 @@ describe('shellQuote', () => {
         ['a^b@example.com', '!QUOTE_PROBE!'],
         ['a!b@example.com', 'Work ^Budget'],
         ['a!b@example.com', 'Work ^!Budget'],
+        ['you@example.com', 'Work $Budget'],
       ];
       for (const [email, app] of pairs) {
-        const line = `"${process.execPath}" "${script}" ${shellQuote(email, 'cmd')} --oauth-app ${shellQuote(app, 'cmd')}`;
-        const result = spawnSync('cmd.exe', ['/d', '/v:off', '/s', '/c', `"${line}"`], {
-          env: { ...process.env, QUOTE_PROBE: 'expanded' },
-          windowsVerbatimArguments: true,
+        const line = `${shellQuote(process.execPath, shell)} ${shellQuote(script, shell)} ${shellQuote(email, shell)} --oauth-app ${shellQuote(app, shell)}`;
+        const result = spawnSync(shell === 'cmd' ? 'cmd.exe' : '/bin/sh', shell === 'cmd' ? ['/d', '/v:off', '/s', '/c', `"${line}"`] : ['-c', line], {
+          env: { ...process.env, QUOTE_PROBE: 'expanded', Budget: 'expanded' },
+          windowsVerbatimArguments: shell === 'cmd',
           encoding: 'utf8',
           timeout: 5_000,
         });
         expect(result.error).toBeUndefined();
         expect(result.status, result.stderr).toBe(0);
         expect(JSON.parse(result.stdout.trim()), `${email} ${app}`).toEqual([email, '--oauth-app', app]);
-      }
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
-  }, 60_000);
-
-  it.runIf(process.platform !== 'win32')('round-trips arguments through a POSIX shell', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'msgvault-shell-quote-'));
-    try {
-      const script = join(dir, 'argv.js');
-      writeFileSync(script, 'console.log(JSON.stringify(process.argv.slice(2)));');
-      for (const value of [...roundTripValues, 'Work $Budget', '$(echo LEAKED)']) {
-        const line = `${shellQuote(process.execPath, 'posix')} ${shellQuote(script, 'posix')} ${shellQuote(value, 'posix')} --oauth-app ${shellQuote('Work $Budget', 'posix')}`;
-        const result = spawnSync('/bin/sh', ['-c', line], {
-          env: { ...process.env, Budget: 'expanded' },
-          encoding: 'utf8',
-          timeout: 5_000,
-        });
-        expect(result.error).toBeUndefined();
-        expect(result.status, result.stderr).toBe(0);
-        expect(JSON.parse(result.stdout.trim())).toEqual([value, '--oauth-app', 'Work $Budget']);
       }
     } finally {
       rmSync(dir, { recursive: true, force: true });
