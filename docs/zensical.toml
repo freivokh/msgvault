@@ -49,6 +49,7 @@ nav = [
     {"Profile Automation" = "usage/people-automation.md"},
     {"External Enrichment" = "usage/people-enrichment.md"},
     {"CardDAV Contacts" = "usage/people-carddav.md"},
+    {"Kata Issues" = "usage/kata-issues.md"},
     {"Accounts and Collections" = "usage/multi-account.md"},
   ]},
   {"Maintain and Operate" = [
@@ -64,6 +65,7 @@ nav = [
     {"CLI Reference" = "cli-reference.md"},
     {"Configuration" = "configuration.md"},
     {"HTTP API" = "api-server.md"},
+    {"Go library" = "guides/embedding.md"},
     {"MCP Server" = "usage/chat.md"},
     {"Agent Skills" = "guides/agent-skills.md"},
     {"FAQ" = "faq.md"},

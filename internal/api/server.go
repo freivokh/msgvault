@@ -21,6 +21,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"go.kenn.io/kit/telemetry/posthog"
 	"go.kenn.io/msgvault/internal/agentgrant"
 	"go.kenn.io/msgvault/internal/apiprotocol"
 	"go.kenn.io/msgvault/internal/config"
@@ -220,7 +221,7 @@ type SyncScheduler interface {
 	// acquires the daemon's operation gate, avoiding a self-deadlock when
 	// the request itself is holding that gate.
 	IsJobScheduled(name string) bool
-	StartJob(name string) error
+	StartJob(name string) (scheduler.JobDisposition, error)
 	TriggerJob(name string) error
 }
 
@@ -411,6 +412,9 @@ type Server struct {
 	// and embedded callers that construct a Server without options, which
 	// fall back to the legacy loose-file open.
 	blobStore AttachmentBlobStore
+	// messageRecordings joins recordings with Docbank transcripts. Nil serves
+	// an empty list.
+	messageRecordings *MessageRecordingReader
 	// remoteImages is the SSRF-hardened fetcher behind
 	// POST /api/v1/content/remote-image. Tests replace it to inject a fake
 	// resolver and dialer.
@@ -419,8 +423,10 @@ type Server struct {
 	// that result, collapsing the per-cid fan-out (see inline_cache.go).
 	inlineCache *inlineParseCache
 	spaHandler  http.Handler
-	sessions    *sessionStore
-	agentGrants *agentgrant.Registry
+	// telemetryCapture serves POST /api/v1/telemetry/events.
+	telemetryCapture http.Handler
+	sessions         *sessionStore
+	agentGrants      *agentgrant.Registry
 	// trustedProxies contains only explicitly configured direct proxy peers.
 	// Forwarded scheme/host data is ignored for every other RemoteAddr.
 	trustedProxies   []netip.Prefix
@@ -435,6 +441,7 @@ type Server struct {
 	taskIntegrationProbe     TaskIntegrationProbe
 	taskLinkOperations       TaskLinkOperations
 	personAgendaOperations   PersonAgendaOperations
+	kataIssueOperations      KataIssueOperations
 	taskIdentityResolver     TaskIdentityResolver
 	fastmailInventoryFactory provideridentity.Factory
 	gmailProfileAddress      func(context.Context, *store.Source) (string, error)
@@ -548,6 +555,9 @@ type ServerOptions struct {
 	// packed CAS storage with a loose-file fallback. Nil keeps the legacy
 	// loose-file-only read path.
 	BlobStore AttachmentBlobStore
+	// MessageRecordings reads recordings and their Docbank transcripts for
+	// GET /api/v1/messages/{id}/recordings. Nil serves an empty list.
+	MessageRecordings *MessageRecordingReader
 	// RequestTimeout caps each request by adding a deadline to the request
 	// context. Zero defaults to 60s. The underlying http.Server's WriteTimeout
 	// is set to RequestTimeout + 5s so handlers that honor cancellation can
@@ -570,12 +580,15 @@ type ServerOptions struct {
 	// internal/web.Handler and is the production default. Tests may inject a
 	// handler built over an in-memory filesystem.
 	SPAHandler http.Handler
+	// TelemetryCapture serves POST /api/v1/telemetry/events. Nil admits no event.
+	TelemetryCapture http.Handler
 	// TaskIntegrationProbe overrides provider-neutral task discovery for tests.
 	// Nil uses taskclient.Evaluate.
 	TaskIntegrationProbe   TaskIntegrationProbe
 	TaskLinkOperations     TaskLinkOperations
 	TaskIdentityResolver   TaskIdentityResolver
 	PersonAgendaOperations PersonAgendaOperations
+	KataIssueOperations    KataIssueOperations
 	// FastmailInventoryFactory is the provider-read seam used by identity
 	// discovery. Nil constructs the production JMAP client.
 	FastmailInventoryFactory provideridentity.Factory
@@ -641,9 +654,11 @@ func NewServerWithOptions(opts ServerOptions) *Server {
 		statsSnapshotWait:      statsSnapshotWait,
 		vectorStatsTimeout:     vectorStatsTimeout,
 		blobStore:              opts.BlobStore,
+		messageRecordings:      opts.MessageRecordings,
 		remoteImages:           remoteimage.NewFetcher(),
 		inlineCache:            newInlineParseCache(inlineCacheMaxEntries, inlineCacheMaxBytes),
 		spaHandler:             opts.SPAHandler,
+		telemetryCapture:       opts.TelemetryCapture,
 		sessions:               newSessionStore(defaultSessionTTL),
 		agentGrants: func() *agentgrant.Registry {
 			if opts.Config != nil && opts.Config.Server.AgentAccess {
@@ -658,6 +673,7 @@ func NewServerWithOptions(opts ServerOptions) *Server {
 		taskIntegrationProbe:     taskProbe,
 		taskLinkOperations:       opts.TaskLinkOperations,
 		personAgendaOperations:   opts.PersonAgendaOperations,
+		kataIssueOperations:      opts.KataIssueOperations,
 		taskIdentityResolver:     opts.TaskIdentityResolver,
 		fastmailInventoryFactory: fastmailInventoryFactory,
 		gmailProfileAddress:      opts.GmailProfileAddress,
@@ -667,6 +683,10 @@ func NewServerWithOptions(opts ServerOptions) *Server {
 		engine: opts.Engine, mode: opts.AnalyticsMode,
 		analyticsInitializationActive: opts.AnalyticsInitializationActive,
 	})
+	if s.telemetryCapture == nil {
+		// kit's nil-reporter handler admits no event.
+		s.telemetryCapture = posthog.NewCaptureHandler(nil)
+	}
 	if s.taskIdentityResolver == nil {
 		s.taskIdentityResolver = s.resolveTaskMessageIdentity
 	}
@@ -675,6 +695,9 @@ func NewServerWithOptions(opts ServerOptions) *Server {
 	}
 	if s.personAgendaOperations == nil {
 		s.personAgendaOperations = newPersonAgendaBackend(opts.Config, opts.Store)
+	}
+	if s.kataIssueOperations == nil {
+		s.kataIssueOperations = newKataIssueBackend(opts.Config, opts.Store)
 	}
 	s.vectorStatus = opts.VectorStatus
 	if s.vectorStatus == "" {
@@ -1439,12 +1462,12 @@ func (w *trackingResponseWriter) WroteHeader() bool {
 // no API key is configured (pure local mode, the TUI/CLI autostart case) or it
 // carries a valid API key (an authenticated local client). apiRequestAuthorized
 // returns true in exactly those two cases, so it is reused here to avoid the
-// auth logic drifting.
+// auth logic drifting. A valid remote client key is trusted the same way.
 func (s *Server) loopbackRateLimitExempt(r *http.Request) bool {
 	if r.Method == http.MethodPost && r.URL.Path == sessionLoginPath {
 		return false
 	}
-	return isLoopbackRequest(r) && s.apiRequestAuthorized(r)
+	return isLoopbackRequest(r) && (s.apiRequestAuthorized(r) || s.remoteClientRequest(r))
 }
 
 func (s *Server) logUnauthorizedAPIRequest(r *http.Request) {
@@ -1455,13 +1478,14 @@ func (s *Server) logUnauthorizedAPIRequest(r *http.Request) {
 }
 
 func (s *Server) handleDaemonShutdown(w http.ResponseWriter, r *http.Request) {
-	if s.shutdownToken == "" || s.shutdownFunc == nil {
+	callerAuthorized := s.requestAuthentication(r).Mode == AuthModeCaller
+	if s.shutdownFunc == nil || (!callerAuthorized && s.shutdownToken == "") {
 		writeError(w, http.StatusNotFound, "shutdown_unavailable", "Daemon shutdown is not available")
 		return
 	}
 
 	got := r.Header.Get(DaemonShutdownTokenHeader)
-	if subtle.ConstantTimeCompare([]byte(got), []byte(s.shutdownToken)) != 1 {
+	if !callerAuthorized && subtle.ConstantTimeCompare([]byte(got), []byte(s.shutdownToken)) != 1 {
 		s.logger.Warn("unauthorized daemon shutdown request", "remote_addr", r.RemoteAddr)
 		writeError(w, http.StatusUnauthorized, "unauthorized", "Invalid or missing daemon shutdown token")
 		return
@@ -1505,13 +1529,13 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleAuthenticatedHealth returns health details that are safe behind the
-// API-key boundary. Delegated callers receive the public projection plus
+// API-key boundary. Delegated callers and remote clients receive the public projection plus
 // APISchemaVersion only, so they can verify version compatibility without
 // seeing internal operation labels that name configured account identifiers.
 func (s *Server) handleAuthenticatedHealth(w http.ResponseWriter, r *http.Request) {
 	s.refreshVectorStatus(r.Context())
 	auth := s.requestAuthentication(r)
-	if auth.Mode == AuthModeDelegated {
+	if auth.Mode == AuthModeDelegated || auth.Mode == AuthModeRemoteClient {
 		writeJSON(w, http.StatusOK, HealthResponse{
 			Status:           "ok",
 			Vector:           s.vectorHealthPublic(),

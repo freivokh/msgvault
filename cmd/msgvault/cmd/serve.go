@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+	"go.kenn.io/kit/telemetry/posthog"
 	"go.kenn.io/msgvault/internal/api"
 	"go.kenn.io/msgvault/internal/carddav"
 	"go.kenn.io/msgvault/internal/circleback"
@@ -30,6 +31,7 @@ import (
 	"go.kenn.io/msgvault/internal/granola"
 	imaplib "go.kenn.io/msgvault/internal/imap"
 	"go.kenn.io/msgvault/internal/jobctx"
+	"go.kenn.io/msgvault/internal/kataevidence"
 	"go.kenn.io/msgvault/internal/meetingimport"
 	"go.kenn.io/msgvault/internal/muesli"
 	"go.kenn.io/msgvault/internal/notionmeetings"
@@ -50,6 +52,8 @@ import (
 	"go.kenn.io/msgvault/internal/syncerr"
 	"go.kenn.io/msgvault/internal/synctechsms"
 	"go.kenn.io/msgvault/internal/teams"
+	"go.kenn.io/msgvault/internal/telemetry"
+	"go.kenn.io/msgvault/internal/twilio"
 	"golang.org/x/oauth2"
 )
 
@@ -253,6 +257,15 @@ func runServe(cmd *cobra.Command, args []string) error {
 		<-heartbeatDone
 		if err := ownership.Close(); err != nil {
 			logger.Warn("release daemon ownership failed", "error", err)
+		}
+	}()
+	telemetryReporter := telemetry.NewReporterOrDisabled(telemetry.Options{
+		DataDir: cfg.Data.DataDir, Version: Version, Commit: Commit,
+		ConfigEnabled: cfg.Telemetry.EnabledOrDefault(),
+	}, logger)
+	defer func() {
+		if err := telemetryReporter.Close(); err != nil {
+			logger.Warn("close telemetry reporter", "error", err)
 		}
 	}()
 	setStartupPhase := func(phase string) {
@@ -704,6 +717,34 @@ func runServe(cmd *cobra.Command, args []string) error {
 			logger.Info("scheduled notion meeting source", "source", source.Identifier, "schedule", source.Schedule)
 		}
 	}
+	for _, src := range cfg.Twilio {
+		if src.Enabled && src.Schedule == "" {
+			logger.Warn("twilio source is enabled but has no schedule — the daemon will not sync it; its freshness will eventually go stale",
+				"source", src.Identifier,
+				"hint", `set a cron schedule (e.g. "15 */6 * * *") on the [[twilio]] entry`)
+		}
+	}
+	for _, src := range cfg.ScheduledTwilioSources() {
+		source := src
+		jobName, ok := api.SchedulerJobNameForSource(twilio.SourceType, source.Identifier)
+		if !ok {
+			logger.Error("no scheduler job mapping for twilio source", "source", source.Identifier)
+			continue
+		}
+		if err := sched.AddJob(scheduler.Job{
+			Name:     jobName,
+			Schedule: source.Schedule,
+			Run: invocationBoundJobRun(state, func(ctx context.Context) error {
+				return runScheduledSource(ctx, attachmentMaint, true, func(ctx context.Context) error {
+					return runConfiguredTwilioSync(ctx, s, source)
+				})
+			}),
+		}); err != nil {
+			logger.Error("failed to schedule twilio source", "source", source.Identifier, "error", err)
+		} else {
+			logger.Info("scheduled twilio source", "source", source.Identifier, "schedule", source.Schedule)
+		}
+	}
 	for _, src := range cfg.Muesli {
 		if src.Enabled && src.Schedule == "" {
 			logger.Warn("muesli source is enabled but has no schedule — the daemon will not sync it; its freshness will eventually go stale",
@@ -728,6 +769,31 @@ func runServe(cmd *cobra.Command, args []string) error {
 			logger.Error("failed to schedule muesli source", "source", source.Identifier, "error", err)
 		} else {
 			logger.Info("scheduled muesli source", "source", source.Identifier, "schedule", source.Schedule)
+		}
+	}
+
+	for _, src := range cfg.Twenty {
+		if src.Enabled && src.Schedule == "" {
+			logger.Warn("Twenty source is enabled but has no schedule; the daemon will not sync it",
+				"source", src.Identifier, "hint", `set schedule on the [[twenty]] entry`)
+		}
+	}
+	for _, src := range cfg.ScheduledTwentySources() {
+		source := src
+		jobName, ok := api.SchedulerJobNameForSource(sourceTypeTwenty, source.Identifier)
+		if !ok {
+			logger.Error("no scheduler job mapping for Twenty source", "source", source.Identifier)
+			continue
+		}
+		if err := sched.AddJob(scheduler.Job{
+			Name: jobName, Schedule: source.Schedule,
+			Run: invocationBoundJobRun(state, func(ctx context.Context) error {
+				return runConfiguredTwentySync(ctx, s, source)
+			}),
+		}); err != nil {
+			logger.Error("failed to schedule Twenty source", "source", source.Identifier, "error", err)
+		} else {
+			logger.Info("scheduled Twenty source", "source", source.Identifier, "schedule", source.Schedule)
 		}
 	}
 
@@ -770,6 +836,11 @@ func runServe(cmd *cobra.Command, args []string) error {
 	}
 	schedAdapter := &schedulerAdapter{scheduler: sched, media: mediaSched}
 
+	messageRecordings, err := newMessageRecordingReader(ctx, s, cfg.Integrations.Docbank)
+	if err != nil {
+		logger.Warn("Message transcripts unavailable", "error", err)
+	}
+
 	// Create and start API server
 	var apiServer *api.Server
 	apiOpts := api.ServerOptions{
@@ -799,6 +870,8 @@ func runServe(cmd *cobra.Command, args []string) error {
 		OperationGate:                 operationGate,
 		OperationHistoryReader:        storeAdapter,
 		BlobStore:                     blobStore,
+		TelemetryCapture:              telemetry.CaptureHandler(telemetryReporter, cfg.Data.DataDir),
+		MessageRecordings:             messageRecordings,
 	}
 	apiOpts.GmailProfileAddress = func(ctx context.Context, source *store.Source) (string, error) {
 		client, serviceAccount, err := newDaemonGmailClient(
@@ -882,11 +955,25 @@ func runServe(cmd *cobra.Command, args []string) error {
 			combineWorkTrackers(idleTracker, labelWorkTracker(operationGate, "background embedding work")),
 			apiServer, sched, blobStore,
 		)
+		telemetryHeartbeatDone := make(chan struct{})
+		go func() {
+			defer close(telemetryHeartbeatDone)
+			posthog.RunHeartbeat(ctx, telemetryReporter, logger)
+		}()
+		// Stop the heartbeat before the deferred telemetryReporter.Close.
+		defer func() {
+			cancel()
+			<-telemetryHeartbeatDone
+		}()
 
 		fmt.Printf("msgvault daemon started\n")
 		fmt.Printf("  API server: http://%s\n", apiAddr)
 		fmt.Printf("  Scheduled accounts: %d\n", count)
 		fmt.Printf("  Data directory: %s\n", cfg.Data.DataDir)
+		if telemetryReporter.Enabled() {
+			fmt.Printf("  Anonymous telemetry: on ([telemetry] enabled = false or %s=0 turns it off)\n",
+				telemetry.EnabledEnv)
+		}
 		fmt.Println()
 		fmt.Println("Press Ctrl+C to stop.")
 		fmt.Println()
@@ -1013,8 +1100,11 @@ func reconcileCardDAVSchedulerJob(sched *scheduler.Scheduler, cardDAVConfig conf
 	if service == nil {
 		sched.RemoveJob(jobName)
 		hint := "save the CardDAV account with its password to repair the connection"
-		if cardDAVConfig.Provider == "google" {
+		switch cardDAVConfig.Provider {
+		case "google":
 			hint = "connect Google in CardDAV account settings, then test and save the account"
+		case "microsoft":
+			hint = "run msgvault carddav authorize-microsoft with the account email, then test and save the account"
 		}
 		logger.Warn("carddav credentials are unavailable or do not match saved discovery; skipping scheduled sync",
 			"connection", name, "hint", hint)
@@ -1750,6 +1840,15 @@ func (a *storeAPIAdapter) PersonDayContext(
 	ctx context.Context, request store.PersonDayRequest,
 ) (*store.PersonDayPage, error) {
 	return a.store.PersonDayContext(ctx, request)
+}
+
+// Kata issue evidence reaches the API through the adapter.
+func (a *storeAPIAdapter) LoadKataEvidenceSource(ctx context.Context, selector kataevidence.Selector) (kataevidence.SourceRecord, error) {
+	return a.store.LoadKataEvidenceSource(ctx, selector)
+}
+
+func (a *storeAPIAdapter) ReadKataEvidenceSource(ctx context.Context, ref kataevidence.Reference) (kataevidence.SourceRecord, error) {
+	return a.store.ReadKataEvidenceSource(ctx, ref)
 }
 
 // ListPersonUIDsContext forwards to the store so the daemon's adapter, not a
@@ -2877,11 +2976,15 @@ func (a *storeAPIAdapter) HasSuccessfulPersonInferenceCheck(ctx context.Context,
 	return a.store.HasSuccessfulPersonInferenceCheck(ctx, fingerprint)
 }
 
+func (a *storeAPIAdapter) ListPersonInferenceProfiles(ctx context.Context) ([]peoplesweep.ProviderProfile, error) {
+	return a.store.ListPersonInferenceProfiles(ctx)
+}
+
 func (a *storeAPIAdapter) InvalidatePersonInferenceCheck(ctx context.Context, fingerprint string) (bool, error) {
 	return a.store.InvalidatePersonInferenceCheck(ctx, fingerprint)
 }
 
-func (a *storeAPIAdapter) GrantPersonInferenceConsent(ctx context.Context, fingerprint, actor string) (*store.PersonInferenceConsent, bool, error) {
+func (a *storeAPIAdapter) GrantPersonInferenceConsent(ctx context.Context, fingerprint, actor string) (*store.ProviderConsent, bool, error) {
 	return a.store.GrantPersonInferenceConsent(ctx, fingerprint, actor)
 }
 
@@ -3847,7 +3950,7 @@ func (a *schedulerAdapter) TriggerJob(name string) error {
 	return a.jobScheduler(name).TriggerJob(name)
 }
 
-func (a *schedulerAdapter) StartJob(name string) error {
+func (a *schedulerAdapter) StartJob(name string) (scheduler.JobDisposition, error) {
 	return a.jobScheduler(name).StartJob(name)
 }
 

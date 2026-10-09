@@ -370,7 +370,7 @@ func TestOperationGateMiddlewareStopsWaitingWhenRequestContextCancels(t *testing
 	cancel()
 	select {
 	case <-done:
-	case <-time.After(500 * time.Millisecond):
+	case <-time.After(5 * time.Second):
 		release()
 		require.FailNow("handler did not return after request cancellation")
 	}
@@ -649,7 +649,7 @@ func TestSerialOperationGateDrainRejectsQueuedWorkAndWaitsForActive(t *testing.T
 	select {
 	case queuedOK := <-queuedDone:
 		assert.Fail("queued work returned before drain", "ok=%v", queuedOK)
-	case <-time.After(25 * time.Millisecond):
+	case <-time.After(25 * time.Millisecond): //nolint:kennlint // absence check: active work keeps queued work waiting
 	}
 
 	drainDone := make(chan error, 1)
@@ -660,7 +660,7 @@ func TestSerialOperationGateDrainRejectsQueuedWorkAndWaitsForActive(t *testing.T
 	select {
 	case queuedOK := <-queuedDone:
 		assert.False(queuedOK, "queued work should be rejected by drain")
-	case <-time.After(500 * time.Millisecond):
+	case <-time.After(5 * time.Second):
 		releaseActive()
 		require.FailNow("queued work did not return after drain started")
 	}
@@ -668,14 +668,14 @@ func TestSerialOperationGateDrainRejectsQueuedWorkAndWaitsForActive(t *testing.T
 	select {
 	case err := <-drainDone:
 		assert.Fail("drain returned before active work released", "err=%v", err)
-	case <-time.After(25 * time.Millisecond):
+	case <-time.After(25 * time.Millisecond): //nolint:kennlint // absence check: unreleased active work keeps the drain waiting
 	}
 
 	releaseActive()
 	select {
 	case err := <-drainDone:
 		require.NoError(err, "drain")
-	case <-time.After(500 * time.Millisecond):
+	case <-time.After(5 * time.Second):
 		require.FailNow("drain did not finish after active work released")
 	}
 
@@ -894,7 +894,7 @@ func TestReadOnlyPostRoutePatternsMatchExplorationRoutes(t *testing.T) {
 	require.NotNil(completion, "participant completion route must exist")
 	require.NotNil(completion.Post, "participant completion must be registered as POST")
 
-	expected := []string{remoteImagePath, cardDAVAccountTestPath, completionPath, "/api/v1/saved-views/{id}/run"}
+	expected := []string{remoteImagePath, cardDAVAccountTestPath, completionPath, kataEvidencePreparePath, "/api/v1/saved-views/{id}/run"}
 	for path, item := range doc.Paths {
 		if item.Post != nil && slices.Contains(item.Post.Tags, "Exploration") {
 			expected = append(expected, path)

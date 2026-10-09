@@ -344,7 +344,15 @@ import (
 // 3.1.0 adds opt-in calendar event control and availability queries.
 // 3.2.0 adds counts_pending to CLI account listing for callers that opt in by
 // header while the first count refresh runs.
-const APISchemaVersion = "3.2.0"
+// 3.3.0 adds POST /api/v1/telemetry/events for web UI usage events. Additive (minor bump).
+// 3.4.0 adds Kata issues that quote exact message and file evidence, the
+// microsoft CardDAV provider, microsoft_authorization_required and
+// microsoft_contact_too_large.
+// 3.5.0 adds the account: and received: search operators.
+// 3.6.0 adds GET /api/v1/messages/{id}/recordings for live audio and transcript coverage.
+// 3.7.0 adds scoped lexical transcript search at GET /api/v1/media/search.
+// 3.8.0 adds reader credentials, HTTP 409 for ambiguous raw references, and HTTP 413 for remote read limits.
+const APISchemaVersion = "3.8.0"
 
 // OpenAPIDocument builds the API schema from the same Huma route registration
 // used by the daemon. It binds no socket and needs no database.
@@ -997,7 +1005,7 @@ func applyClientCodegenExtensions(doc *huma.OpenAPI) {
 		}
 	}
 
-	for _, schemaName := range []string{"FileSearchRow", "FileMetadataResponse", "PersonFileSearchRow"} {
+	for _, schemaName := range []string{"FileSearchRow", "FileMetadataResponse", "PersonFileSearchRow", "MessageRecording"} {
 		if schema := schemas[schemaName]; schema != nil {
 			for _, property := range []string{"filename", "mime_type"} {
 				if schema.Properties[property] != nil {
@@ -1108,6 +1116,16 @@ func applyClientCodegenExtensions(doc *huma.OpenAPI) {
 			schema.Extensions = map[string]any{}
 		}
 		schema.Extensions["x-enum-names"] = enumNames
+	}
+	if recording := schemas["MessageRecording"]; recording != nil {
+		setEnumNames(recording.Properties["state"], qualifiedEnumNames("MessageRecordingState",
+			[]string{recordingReady, recordingProcessing, recordingMissing, recordingFailed, recordingUnsupported, recordingMediaMissing, recordingUnavailable}))
+	}
+	if transcript := schemas["MessageTranscript"]; transcript != nil {
+		setEnumNames(transcript.Properties["origin"], qualifiedEnumNames("MessageTranscriptOrigin", []string{"supplied", "generated"}))
+	}
+	if result := schemas["MediaSearchResult"]; result != nil {
+		setEnumNames(result.Properties["origin"], qualifiedEnumNames("MediaSearchResultOrigin", []string{"supplied", "generated"}))
 	}
 	if request := schemas["CalendarRequest"]; request != nil {
 		for property, names := range map[string][]any{
@@ -1298,6 +1316,12 @@ func applyClientCodegenExtensions(doc *huma.OpenAPI) {
 			schemaName + "AllowedResolutionsKeepLocal",
 			schemaName + "AllowedResolutionsKeepRemote",
 		})
+	}
+	// Without the override, empty-schema map values generate struct{}, which cannot carry surface="web".
+	if telemetry := schemas["TelemetryEventRequest"]; telemetry != nil && telemetry.Properties["properties"] != nil {
+		if values, ok := telemetry.Properties["properties"].AdditionalProperties.(*huma.Schema); ok {
+			setCodegenGoType(values, "any")
+		}
 	}
 	meeting := schemas["Meeting"]
 	if meeting == nil || meeting.Properties == nil {

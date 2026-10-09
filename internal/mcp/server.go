@@ -112,10 +112,12 @@ type ServeOptions struct {
 	SimilarSearcher     SimilarSearcher
 	DataDir             string
 	DocumentSearcher    DocumentSearcher
+	MediaSearcher       MediaSearcher
 	PersonFileSearcher  PersonFileSearcher
 	PeopleBackend       peoplebrowser.Backend
 	DirectoryBackend    peoplebrowser.DirectoryLister
 	PersonAgendaBackend PersonAgendaBackend
+	Kata                KataBackend
 	// AllowProfileWrites exposes person promotion and Notes mutation tools.
 	// It remains false unless the operator explicitly opts in.
 	AllowProfileWrites bool
@@ -132,6 +134,9 @@ type ServeOptions struct {
 	// AllowCalendarWrites exposes calendar mutation tools when the transport's
 	// general write policy also permits writes.
 	AllowCalendarWrites bool
+	// AllowKataWrites exposes Kata issue creation and evidence linking when
+	// the transport's general write policy also permits writes.
+	AllowKataWrites bool
 
 	// HybridEngine is optional. When nil, semantic_search_messages rejects
 	// vector/hybrid searches with a vector_not_enabled error.
@@ -350,6 +355,7 @@ func newMCPServerWithPolicy(
 		similarSearcher:     opts.SimilarSearcher,
 		dataDir:             opts.DataDir,
 		documentSearcher:    opts.DocumentSearcher,
+		mediaSearcher:       opts.MediaSearcher,
 		personFileSearcher:  opts.PersonFileSearcher,
 		peopleBackend:       opts.PeopleBackend,
 		directoryBackend:    opts.DirectoryBackend,
@@ -361,6 +367,7 @@ func newMCPServerWithPolicy(
 		meetings:            opts.Meetings,
 		calendar:            opts.Calendar,
 		personAgendaBackend: opts.PersonAgendaBackend,
+		kata:                opts.Kata,
 		identityReview:      opts.IdentityReview,
 		personCardDAV:       opts.PersonCardDAV,
 		identityScoring:     opts.IdentityScoring,
@@ -393,6 +400,10 @@ func newMCPServerWithPolicy(
 		}
 		if definition.security == toolSecurityCalendarWrite &&
 			(!allowWrites || !opts.AllowCalendarWrites) {
+			continue
+		}
+		if definition.security == toolSecurityKataWrite &&
+			(!allowWrites || !opts.AllowKataWrites) {
 			continue
 		}
 		sdkmcp.AddTool[map[string]any, any](s, definition.tool(), officialToolHandler(definition.bind(h), confirmation))

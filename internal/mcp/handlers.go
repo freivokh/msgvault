@@ -141,6 +141,7 @@ type handlers struct {
 	similarSearcher     SimilarSearcher
 	dataDir             string
 	documentSearcher    DocumentSearcher
+	mediaSearcher       MediaSearcher
 	personFileSearcher  PersonFileSearcher
 	peopleBackend       peoplebrowser.Backend
 	directoryBackend    peoplebrowser.DirectoryLister
@@ -148,6 +149,7 @@ type handlers struct {
 	meetings            MeetingBackend
 	calendar            CalendarBackend
 	personAgendaBackend PersonAgendaBackend
+	kata                KataBackend
 	identityReview      IdentityReviewBackend
 	personCardDAV       PersonCardDAVBackend
 	identityScoring     IdentityScoringBackend
@@ -526,6 +528,8 @@ func translateDaemonRequestError(err error) *toolResult {
 		message = "vector_init_failed: vector search failed to initialize"
 	case "invalid_query":
 		message = "invalid_query: search query is invalid"
+	case "unsupported_filter_mode":
+		message = "unsupported_filter_mode: a filter is not supported in this search mode; account: and received: work only in search_metadata and search_message_bodies"
 	case "invalid_account":
 		message = "invalid_account: account filter is invalid"
 	case "account_not_found":
@@ -1071,6 +1075,9 @@ func (h *handlers) searchMessageBodiesHybrid(
 	}
 
 	filter, err := h.hybridEngine.BuildFilter(ctx, parsed)
+	if errors.Is(err, hybrid.ErrAccountFiltersUnsupported) {
+		return toolErrorResult(err.Error()), nil
+	}
 	if err != nil {
 		return nil, newInternalError("build semantic-search filter", err)
 	}

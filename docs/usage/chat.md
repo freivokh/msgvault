@@ -411,7 +411,7 @@ whose surviving message belongs to another account's conversation. See
 
 ### `search_metadata` and `search_message_bodies` / `semantic_search_messages` query syntax
 
-Supported operators: `from:`, `to:`, `cc:`, `bcc:`, `subject:`, `label:` (or `l:`), `list:` (or `list-id:`), `has:attachment`, `before:`/`after:` (YYYY-MM-DD), `older_than:`/`newer_than:` (e.g. `7d`, `2w`, `1m`, `1y`), `larger:`/`smaller:` (e.g. `5M`). Bare domains on `from:`/`to:` match any address at that domain. Multiple terms are ANDed; repeated List-Id operators require every literal substring.
+Supported operators: `from:`, `to:`, `cc:`, `bcc:`, `subject:`, `label:` (or `l:`), `list:` (or `list-id:`), `has:attachment`, `before:`/`after:` (YYYY-MM-DD), `older_than:`/`newer_than:` (e.g. `7d`, `2w`, `1m`, `1y`), `larger:`/`smaller:` (e.g. `5M`), `received:`/`account:` (an exact confirmed address; not in `semantic_search_messages`). Bare domains on `from:`/`to:` match any address at that domain. Different operators are ANDed; repeated List-Id operators require every literal substring, and repeated `account:` or `received:` values match any of them.
 
 Not supported: negation (`-has:attachment`), `OR`, or parentheses grouping.
 
@@ -646,6 +646,7 @@ msgvault mcp --http 8080
 | `--allow-identity-scoring` | `false` | Expose consented manual identity scoring, which sends bounded raw identity data to the fixed provider. Each run needs client confirmation; HTTP also requires `--http-allow-writes`. |
 | `--allow-person-merges` | `false` | Expose local person merge tools. Each merge needs client confirmation; HTTP also requires `--http-allow-writes`. |
 | `--allow-carddav-writes` | `false` | Expose CardDAV publication and sync tools. Each write needs client confirmation; HTTP also requires `--http-allow-writes`. |
+| `--allow-kata-writes` | `false` | Expose `create_kata_issue` and `link_kata_evidence`, which write quoted archive text to the configured Kata project. The flag is the consent for these writes; they ask for no per-call confirmation, so stdio clients and reviews that file several issues work. `link_kata_evidence` writes only to issues in the configured project. HTTP also requires `--http-allow-writes`. |
 | `--allow-calendar-writes` | `false` | Expose calendar event mutation tools. HTTP also requires `--http-allow-writes`. Treat event text as untrusted input and enable this only for sessions where the user has authorized calendar writes. |
 | `--http-allow-insecure` | `false` | Allow non-loopback HTTP binding without an effective inbound key. A configured key is still enforced. Without a key, use only behind your own network or authentication layer. |
 

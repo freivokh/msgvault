@@ -1,5 +1,5 @@
 ---
-last_edited: "2026-10-04"
+last_edited: "2026-10-06"
 title: Web UI & API Server
 description: Daemon-served analytical Web UI and REST API for your msgvault archive, with optional background sync scheduling.
 ---
@@ -100,9 +100,13 @@ recurrence limits, notification behavior, and reconciliation instructions.
 The API publishes its generated OpenAPI contract at `/openapi.json`.
 `msgvault openapi` prints the checked-in contract without starting a daemon or
 opening an archive. OpenAPI `info.version` is the **API schema version**;
-it is separate from the binary release version. The current schema is **3.2.0**.
+it is separate from the binary release version. The current schema is **3.8.0**.
 Upgrade clients and daemon together across incompatible schema versions,
 including remote deployments.
+
+Schema 3.3.0 adds `POST /api/v1/telemetry/events`, which the web and terminal UIs use to
+report anonymous usage events through the daemon. See
+[Telemetry](configuration.md#telemetry).
 
 Schema 3.0.0 removes the unguarded
 `POST /api/v1/identity/match-candidates/{id}/accept` and `/reject` routes.
@@ -112,11 +116,30 @@ schema fail before issuing archive requests. The HTTP prefix remains `/api/v1`.
 This schema also adds consented identity scoring. See
 [identity match review and scoring](#identity-match-review-and-scoring).
 
+Schema 3.4.0 adds [Kata issues from archive evidence](usage/kata-issues.md).
+It also adds the `microsoft` CardDAV account provider, the
+`microsoft_authorization_required` CardDAV error and repair codes, and the
+`microsoft_contact_too_large` error code, which publish, approve, conflict
+resolution and a sync of one selected connection return with 413 when a card
+exceeds Outlook's 4 MB write limit. A sync of all connections returns 200 and
+reports the code as that connection's failure, and run history records it as
+the failure code.
+
+Schema 3.5.0 adds the `account:` and `received:` search operators.
+
+Schema 3.8.0 adds [read-only remote client credentials](guides/remote-deployment.md#read-only-remote-clients), HTTP 409 for ambiguous raw-message references, and HTTP 413 for remote read limits.
+
 Schema 3.1.0 adds unreleased [calendar event control](#calendar-control),
 availability queries, and opt-in `write` on Calendar consent plans.
 
 Schema 3.2.0 adds `counts_pending` to `GET /api/v1/cli/accounts`. See
 [archive statistics](#get-apiv1stats) for when it appears.
+
+Schema 3.6.0 adds `GET /api/v1/messages/{id}/recordings`, which lists a
+message's recordings with their Docbank transcript state. Existing routes are
+unchanged.
+
+Schema 3.7.0 adds `GET /api/v1/media/search` for scoped lexical transcript search.
 
 Schema 2.35.0 adds `scope_escalation_source_type` (`gmail` or `msmail`) to
 `POST /api/v1/cli/delete-staged/plan` responses that require a permission
@@ -335,6 +358,8 @@ is required. Three API-key authentication methods are supported:
 | Plain auth header | `Authorization: <key>` | `Authorization: my-secret` |
 
 If no effective API key is configured, authentication is not required. Secure startup requires a key for non-loopback addresses. On unreleased `main`, `serve` creates and persists one when no credential source is configured. See [server credentials](configuration.md#server) for file and environment sources, persistence, and explicit insecure mode.
+
+Keys listed under `[[server.remote_clients]]` authenticate the same way but reach only a fixed set of read operations; every other route returns 403. See [read-only remote clients](guides/remote-deployment.md#read-only-remote-clients).
 
 ## Historical import jobs {#historical-import-jobs}
 
@@ -1553,6 +1578,105 @@ Successful responses set:
 
 ---
 
+### Media transcript search
+
+`GET /api/v1/media/search?q=quarterly%20numbers&mode=lexical&limit=20` finds spoken words and returns every matching live message occurrence. Results include message, conversation and attachment IDs, supplied or generated origin, an excerpt, and timing when Docbank recorded it. Optional `person_id` and repeated `direction` values select `from_person`, `to_person` or `group` relations.
+
+The daemon searches the complete allowed population, with a ceiling of 4,096 distinct versions and source selectors. Oversized scopes return `media_search_scope_limit`; set `person_id` to narrow the scope. Semantic and hybrid modes return `media_search_mode_unavailable`. A disabled or unreachable integration returns `media_search_unavailable`.
+
+The response has Docbank `coverage`, local `pending_occurrences` and `unavailable_occurrences`, `attribution_unavailable`, `partial`, and `truncated`. Pending counts require durable worker work; unmapped audio counts as unavailable. Coverage state `unknown` stays unknown. `partial` also reports local gaps and withheld excerpts. An empty result with complete coverage and `partial=false` means the query found no transcript match. The output limit applies after shared recordings expand into messages; `truncated` reports remaining occurrences or Docbank's retrieval limit.
+
+Media search requires Docbank's source-selected search contract: `media_sources` selectors, a `media_source_selection` report marker and query-independent `media_selections`, including empty results. The daemon sends each source's current supplied-input set; generated transcripts stay eligible while supplied work is queued. Docbank selects each source's current transcript before ranking and returns build and exact source associations with each plain excerpt; source selections carry origin and supplied-input identity. Pending or missing transcripts leave coverage partial while ready matches remain searchable. Older servers and remote lookup failures return `media_search_unavailable`. Supplied text requires `supplied_input_id` to match the occurrence's saved delivery; mismatches count as unavailable attribution even when the query has no hits. The daemon validates supplied transcript revisions before search and rechecks visibility, recording identity, supplied text and person scope afterward.
+
+### Message recordings {#get-apiv1messagesidrecordings}
+
+**Endpoint:** `GET /api/v1/messages/{id}/recordings`
+
+List a message's recordings and their transcript state. msgvault reads the
+transcript from the configured [Docbank destination](usage/beeper.md#send-audio-to-docbank)
+on each request and does not store it.
+
+```json
+{
+  "message_id": 42,
+  "recordings": [
+    {
+      "attachment_id": 5,
+      "filename": "voice.wav",
+      "size_bytes": 48213,
+      "state": "ready",
+      "transcript": {
+        "origin": "supplied",
+        "partial": false,
+        "units": [
+          { "text": "See you at noon.", "start_ms": 0, "end_ms": 1500, "speaker": "alice" }
+        ]
+      }
+    }
+  ]
+}
+```
+
+`state` is one of:
+
+| State | Meaning |
+|---|---|
+| `ready` | Docbank has transcript text; `transcript` is set |
+| `processing` | The transcript is queued or running |
+| `missing` | Docbank has the audio but no transcript |
+| `failed` | Docbank's transcription failed or was cancelled |
+| `unsupported` | Transcription eligibility or limits reject the recording |
+| `media_missing` | The audio bytes are missing from the archive |
+| `unavailable` | msgvault can't show a transcript; see below |
+
+A recording is `unavailable` when:
+
+- Docbank can't be reached in time, or the API key is missing.
+- Docbank returns evidence that msgvault can't attribute to this recording,
+  such as a provider transcript that another message or an earlier edit sent
+  for the same audio.
+- `all_sources_upload_consent` is off, so the media worker won't send audio
+  that is waiting to be sent, including a provider transcript that changed.
+- The media worker blocked the recording for a reason other than transcription eligibility or limits.
+- Capture policy skipped the recording's bytes.
+
+`origin` is `supplied` for a provider transcript and `generated` for speech
+recognition. `partial` is true when Docbank reports truncated, incomplete or
+omitted text. A unit's `start_ms`, `end_ms` and `speaker` are present only when
+Docbank recorded them.
+
+A `supplied` transcript shows only when Docbank identifies the exact input
+msgvault sent for the message's current recording. This requires Docbank's
+[supplied-input attribution](https://github.com/kenn-io/docbank/pull/825).
+Older Docbank servers that omit this identity leave supplied text `unavailable`. Matching evidence can
+show `ready` before the local worker polls completion. An edited transcript
+reads as `processing` while delivery is pending and uploads are allowed.
+A delivery that failed reads as `failed`.
+If Docbank serves another input for the same audio, including after a transcript
+is reverted, supplied text stays `unavailable` until Docbank serves the saved input.
+
+Only live messages list recordings. A message that is hidden as a duplicate or
+deleted from its source returns an empty list. Captured audio without a current
+worker mapping reads as `unavailable` until discovery records processing work.
+When the Docbank integration is off, or its `url`
+is invalid, archived recordings stay visible with transcript state `unavailable`;
+audio whose bytes are absent stays `media_missing`, or `unavailable` when capture policy skipped it. A
+non-positive or non-numeric ID returns `400 invalid_id`.
+
+Person-scoped Media and Files, search, CLI, TUI and MCP readers are later work.
+
+The Web reader refreshes visible recordings while the message stays open.
+Unchanged results increase the interval from 2 seconds up to 30 seconds.
+Returning to the tab refreshes immediately. A changed message clears earlier
+evidence before loading its recordings again.
+
+Each request reads Docbank for retained recordings only, up to four at a time.
+The reads share a budget of 20 seconds or half the remaining request time,
+whichever is shorter. A read that runs out of budget leaves its recording
+`unavailable`.
+
+---
+
 ### Search messages {#get-apiv1search}
 
 **Endpoint:** `GET /api/v1/search`
@@ -1986,6 +2110,16 @@ Trigger a manual sync for an account. Returns immediately with a 202 status whil
   "message": "Sync started for you@gmail.com"
 }
 ```
+
+For sources scheduled as generic jobs (`source_type` set), the body also carries `disposition`:
+
+| Disposition | Meaning |
+|---|---|
+| `started` | The job was idle and a run started. |
+| `pending` | The job was already running; one follow-up run is recorded. Scheduler status reports it as `pending`. |
+| `coalesced` | The request was merged into a run still waiting to start or into a follow-up already pending; no additional run was added. |
+
+Repeated triggers never run the job concurrently. A generic-job trigger does not wait on the daemon's operation gate, so it is answered even while a long import of the same job holds it.
 
 ---
 

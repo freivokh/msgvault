@@ -1698,6 +1698,7 @@ func cliRunCommandAllowed(args []string) bool {
 		"add-calendar",
 		"add-circleback",
 		"add-plaud",
+		"add-twenty",
 		"add-discord",
 		"add-granola",
 		"add-imap",
@@ -1707,6 +1708,7 @@ func cliRunCommandAllowed(args []string) bool {
 		"add-slack",
 		"add-synctech-sms-drive",
 		"add-teams",
+		"add-twilio",
 		"backfill-beeper-media",
 		"backfill-discord-media",
 		"backfill-slack-media",
@@ -1752,13 +1754,15 @@ func cliRunCommandAllowed(args []string) bool {
 		"sync-calendar",
 		"sync-circleback",
 		"sync-plaud",
+		"sync-twenty",
 		"sync-discord",
 		"sync-granola",
 		"sync-muesli",
 		"sync-notion-meetings",
 		"sync-slack",
 		"sync-synctech-sms",
-		"sync-teams":
+		"sync-teams",
+		"sync-twilio":
 		return true
 	default:
 		return false
@@ -2326,6 +2330,10 @@ func (s *Server) handleCLISearch(w http.ResponseWriter, r *http.Request) {
 	limit := parseCLISearchInt(r.URL.Query().Get("limit"), 50)
 	if limit <= 0 {
 		limit = 50
+	}
+	if limit > remoteSearchLimit && s.remoteClientRequest(r) {
+		writeError(w, http.StatusBadRequest, "remote_search_limit", fmt.Sprintf("Remote client search limit must not exceed %d", remoteSearchLimit))
+		return
 	}
 	offset := max(parseCLISearchInt(r.URL.Query().Get("offset"), 0), 0)
 
@@ -3268,6 +3276,10 @@ func (s *Server) handleCLIMessage(w http.ResponseWriter, r *http.Request) {
 
 	msg, err := s.resolveCLIMessage(r, idStr)
 	if err != nil {
+		if errors.Is(err, query.ErrOriginalMessageTooLarge) {
+			writeError(w, http.StatusRequestEntityTooLarge, "remote_message_too_large", "Message content exceeds the remote client byte limit")
+			return
+		}
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to retrieve message")
 		return
 	}
@@ -3290,19 +3302,34 @@ func (s *Server) handleCLIMessageRaw(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	msg, err := s.resolveCLIMessage(r, idStr)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to retrieve message")
+	resolver, ok := s.queryEngineForContext(r.Context()).(query.MessageIDResolver)
+	if !ok {
+		writeError(w, http.StatusServiceUnavailable, "engine_unavailable", "Raw message export is not available for this archive engine")
 		return
 	}
-	if msg == nil {
+	// Resolve only the ID so the byte limit applies to the raw bytes returned, never the decoded body.
+	id, sourceMessageID, err := resolver.ResolveMessageID(r.Context(), idStr)
+	if errors.Is(err, query.ErrAmbiguousReference) {
+		s.writeOriginalExportError(w, "resolve raw message", err)
+		return
+	}
+	if errors.Is(err, store.ErrMessageNotFound) {
 		writeError(w, http.StatusNotFound, cliErrorMessageNotFound, "Message not found")
 		return
 	}
-
-	raw, err := s.queryEngineForContext(r.Context()).GetMessageRaw(r.Context(), msg.ID)
 	if err != nil {
-		s.logger.Error("failed to get CLI raw message", "id", msg.ID, "error", err)
+		s.logger.Error("failed to resolve CLI raw message", "id", idStr, "error", err)
+		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to retrieve message")
+		return
+	}
+
+	raw, err := s.queryEngineForContext(r.Context()).GetMessageRaw(r.Context(), id)
+	if err != nil {
+		if errors.Is(err, query.ErrOriginalMessageTooLarge) {
+			writeError(w, http.StatusRequestEntityTooLarge, "remote_message_too_large", "Message content exceeds the remote client byte limit")
+			return
+		}
+		s.logger.Error("failed to get CLI raw message", "id", id, "error", err)
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to retrieve raw message")
 		return
 	}
@@ -3312,11 +3339,12 @@ func (s *Server) handleCLIMessageRaw(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "message/rfc822")
-	w.Header().Set("X-Msgvault-Message-Id", strconv.FormatInt(msg.ID, 10))
-	w.Header().Set("X-Msgvault-Source-Message-Id", msg.SourceMessageID)
+	w.Header().Set("X-Msgvault-Message-Id", strconv.FormatInt(id, 10))
+	w.Header().Set("X-Msgvault-Source-Message-Id", sourceMessageID)
 	w.WriteHeader(http.StatusOK)
+	// #nosec G705 -- stored MIME bytes are served as message/rfc822, not rendered as HTML.
 	if _, err := w.Write(raw); err != nil {
-		s.logger.Error("failed to write CLI raw message", "id", msg.ID, "error", err)
+		s.logger.Error("failed to write CLI raw message", "id", id, "error", err)
 	}
 }
 
@@ -3344,6 +3372,11 @@ func (s *Server) handleCLIAttachment(w http.ResponseWriter, r *http.Request) {
 			}
 			s.logger.Error("failed to open CLI attachment", "content_hash", contentHash, "error", err)
 			writeError(w, http.StatusInternalServerError, "internal_error", "Failed to retrieve attachment")
+			return
+		}
+		if (size < 0 || size > remoteAttachmentBytes) && s.remoteClientRequest(r) {
+			_ = rc.Close()
+			writeError(w, http.StatusRequestEntityTooLarge, "remote_attachment_too_large", "Attachment exceeds the remote client byte limit")
 			return
 		}
 		w.Header().Set("Content-Type", "application/octet-stream")
@@ -3378,6 +3411,18 @@ func (s *Server) handleCLIAttachment(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer func() { _ = f.Close() }()
+	if s.remoteClientRequest(r) {
+		info, err := f.Stat()
+		if err != nil {
+			s.logger.Error("failed to stat CLI attachment", "content_hash", contentHash, "error", err)
+			writeError(w, http.StatusInternalServerError, "internal_error", "Failed to retrieve attachment")
+			return
+		}
+		if info.Size() > remoteAttachmentBytes {
+			writeError(w, http.StatusRequestEntityTooLarge, "remote_attachment_too_large", "Attachment exceeds the remote client byte limit")
+			return
+		}
+	}
 
 	w.Header().Set("Content-Type", "application/octet-stream")
 	w.Header().Set("X-Msgvault-Content-Hash", contentHash)
@@ -3395,14 +3440,18 @@ func (s *Server) resolveCLIMessage(r *http.Request, idStr string) (*query.Messag
 	if id, parseErr := strconv.ParseInt(idStr, 10, 64); parseErr == nil {
 		msg, err = s.queryEngineForContext(r.Context()).GetMessage(r.Context(), id)
 		if err != nil {
-			s.logger.Error("failed to get CLI message by id", "id", id, "error", err)
+			if !errors.Is(err, query.ErrOriginalMessageTooLarge) {
+				s.logger.Error("failed to get CLI message by id", "id", id, "error", err)
+			}
 			return nil, err
 		}
 	}
 	if msg == nil {
 		msg, err = s.queryEngineForContext(r.Context()).GetMessageBySourceID(r.Context(), idStr)
 		if err != nil {
-			s.logger.Error("failed to get CLI message by source id", "id", idStr, "error", err)
+			if !errors.Is(err, query.ErrOriginalMessageTooLarge) {
+				s.logger.Error("failed to get CLI message by source id", "id", idStr, "error", err)
+			}
 			return nil, err
 		}
 	}

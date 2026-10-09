@@ -1,5 +1,5 @@
 ---
-last_edited: "2026-10-05"
+last_edited: "2026-10-08"
 title: CLI Reference
 description: Complete command reference for all msgvault commands.
 ---
@@ -302,6 +302,18 @@ confirmed identity check, delegated sender grant, UIDPLUS requirement, and
 structured provider outcomes as `draft-reply`. It stores the Bcc envelope in
 the draft so the mail application can use it. It never sends the message or
 validates provider send-as rights.
+
+### Draft to a person
+
+To draft to a person rather than an address, list the person's archived
+identities with [`person identities`](#person), then pass a `supported` email
+address to `--to`.
+
+```bash
+msgvault person identities 7
+msgvault draft-compose --account you@example.com \
+  --to alice@example.com --subject 'Hi' --body 'Draft text'
+```
 
 ### Beeper chat drafts
 
@@ -796,12 +808,15 @@ msgvault sync-granola --full --after 2024-01-01
 
 Incremental by default: only notes updated since the last successful run are
 fetched. With no identifier, every configured `[[granola]]` source is synced.
-Re-fetched notes are upserted in place, so `--full` repairs existing rows
-without creating duplicates. A partial run with one or more failed notes is
-recorded and returned as an error without advancing the successful cursor. If
-other notes were added or updated first, the cache is refreshed before the
-error is returned. Scheduled sync refuses a configured source that has been
-removed from the archive and directs you to run `add-granola` again.
+Re-fetched notes are updated in place; a note whose stored copy, metadata, and
+`is_from_me` attribution are unchanged is skipped without invalidating the
+search cache and is not counted as updated. `--full` rewrites every fetched
+note, which repairs existing rows without creating duplicates. A partial run
+with one or more failed notes is recorded and returned as an error without
+advancing the successful cursor. If other notes were added or updated first,
+the cache is refreshed before the error is returned. Scheduled sync refuses a
+configured source that has been removed from the archive and directs you to run
+`add-granola` again.
 
 | Flag | Default | Description |
 |---|---|---|
@@ -856,6 +871,44 @@ See [Meeting Transcripts](/docs/usage/meetings/#notion-ai-meeting-notes) for set
 privacy, retry behavior, and stored evidence.
 
 ---
+
+## add-twilio
+
+Unreleased: check a configured Twilio account's access and register it as a
+meeting source. Nothing about individual calls is printed.
+
+```bash
+msgvault add-twilio [identifier]
+```
+
+With one `[[twilio]]` entry, omit the identifier. See
+[Twilio configuration](configuration.md#twilio-sources).
+
+## sync-twilio
+
+Unreleased: archive Twilio calls, their recordings and retained transcripts as
+meetings. Without an identifier, sync every configured source. Run
+`add-twilio` first.
+
+```bash
+msgvault sync-twilio [identifier]
+msgvault sync-twilio work --limit 20
+msgvault sync-twilio work --full --after 2026-01-01
+msgvault sync-twilio work --probe
+```
+
+| Flag | Description |
+|---|---|
+| `--limit n` | Process at most n calls. 0 is unlimited |
+| `--full` | Revisit every call Twilio still lists, not only those from the last seven days, including recordings that were skipped or unavailable |
+| `--after YYYY-MM-DD` | Only recordings created on or after this UTC date; implies `--full` |
+| `--probe` | Read one page of recordings and print a count; requires an identifier when several accounts are configured |
+| `--build-cache` | Refresh analytics cache after sync |
+| `--no-build-cache` | Skip analytics cache refresh; mutually exclusive with `--build-cache` |
+
+When `--limit` stops before the end of the call list, the summary says the sync
+paused and prints the command that continues it. See the
+[meeting guide](usage/meetings.md#twilio) for retries and coverage.
 
 ## add-plaud
 
@@ -967,6 +1020,50 @@ cancellation failures fail the sync and preserve the prior successful cursor.
 | `--probe` | `false` | Print the MCP tool inventory and a sample result instead of syncing |
 
 See [Meeting Transcripts](/docs/usage/meetings/) for setup and what gets stored.
+
+---
+
+## add-twenty
+
+Validate read access and register a configured Twenty call recording source.
+
+```bash
+msgvault add-twenty [identifier]
+```
+
+The daemon-host `[[twenty]]` entry requires `account_email`, `base_url`, and
+`api_key`. One entry permits omitting the identifier. Registration checks
+recording, calendar, and participant access before creating the source.
+
+---
+
+## sync-twenty
+
+Archive summaries and diarized transcripts from Twenty call recordings.
+
+```bash
+msgvault sync-twenty [identifier]
+msgvault sync-twenty work --after 2026-01-01 --limit 10
+msgvault sync-twenty work --full
+msgvault sync-twenty work --probe
+```
+
+Each run reads recordings updated since the last successful run, plus a
+five-minute overlap; late summaries and transcripts update the existing meeting. Recordings that can't be
+archived are skipped and reported instead of failing the run. With no identifier, sync visits all configured sources.
+API failures fail the run while retaining previously committed meetings.
+
+| Flag | Default | Description |
+|---|---|---|
+| `--limit` | `0` | Maximum eligible meetings processed (`0` = unlimited); stopped scans report partial coverage, and the next run without `--after` continues, including a stopped `--full` rescan |
+| `--after` | — | Inclusive UTC occurrence-date lower bound (`YYYY-MM-DD`) applied after reading; leaves the sync position unchanged |
+| `--full` | `false` | Rescan every recording and refresh archive projections and attribution; resumes an unfinished limited rescan instead of restarting it |
+| `--probe` | `false` | Check read access without printing content or writing the archive; requires one source |
+| `--build-cache` | `false` | Request a cache build after manual sync |
+| `--no-build-cache` | `false` | Skip the cache build after manual sync |
+
+See [Meeting Transcripts](/docs/usage/meetings/#twenty-call-recordings) for setup,
+stored evidence, duration fallbacks, and retained source deletions.
 
 ---
 
@@ -1988,6 +2085,19 @@ analytics stale for the normal rebuild path.
 
 ---
 
+## media search
+
+Find spoken words in recording transcripts through the daemon's configured Docbank integration:
+
+```bash
+msgvault media search "quarterly numbers"
+msgvault media search "quarterly numbers" --person 7 --direction from_person --limit 20 --json
+```
+
+`--mode lexical` is the default. Semantic and hybrid are unavailable. `--limit` accepts 1 to 100 message occurrences. `--direction` accepts `from_person`, `to_person` or `group` and requires `--person`.
+
+The table shows message, conversation and attachment IDs, supplied or generated origin, plain excerpt, and recorded timing. An empty result proves no match only with complete coverage and `partial=false`. Its coverage line reports pending media, unavailable attribution, partial coverage and truncated results. JSON preserves the same fields. Search requires Docbank's source-selected search contract. Shared audio searches the currently selected transcript; different supplied captions can leave some messages unavailable even when no excerpt matches. A scope may contain at most 4,096 distinct media versions and source selectors; narrow the person scope if it exceeds that ceiling. Use `msgvault show-message <message_id>` to read a result in context. Browser search-result presentation follows separately.
+
 ## documents
 
 Manage hosted extraction and local full-text indexing for standalone document
@@ -2124,6 +2234,8 @@ message ID. A numeric reference selects a live internal ID first, then falls
 back to a provider ID if that internal ID does not exist. This also applies
 with `--thread`.
 
+A provider ID that matches more than one account returns an error. Use the numeric archive message ID to select one message.
+
 ```bash
 msgvault export-eml <id> [flags]
 ```
@@ -2157,6 +2269,8 @@ msgvault export-attachment <content-hash> [flags]
 | `--json` | Output as JSON with base64-encoded data |
 
 The `--json`, `--base64`, and `--output` flags are mutually exclusive.
+
+Stdout output, including `--json`, streams before download verification finishes. Consume it only after the command exits successfully. Use `--output <path>` to save a verified file.
 
 See [Exporting Data](/docs/usage/exporting/) for usage examples.
 
@@ -2193,14 +2307,17 @@ MSGVAULT_HOME=./subset-vault msgvault tui
 |---|---|
 | `-o`, `--output <directory>` | Destination directory (required) |
 | `--rows <count>` | Number of most recent messages to copy; must be positive (required) |
-| `--include-identity` | Copy complete identity clusters for included participants |
+| `--include-identity` | Copy complete identity clusters for included participants and every confirmed address of each included account |
 | `--include-attributes` | Copy current and historical person and organization attribute values |
 | `--include-profiles` | Copy profiles, profile history and media, relationships, employment history, and referenced organizations |
 | `--include-vcard-resources` | Copy complete native vCards and retired UID aliases; requires `--include-profiles` |
 
-The command is SQLite-only. The optional identity, attribute, profile, and
-vCard flags can copy personal records that have no message in the subset; read
-the command's warning before sharing its output.
+The command is SQLite-only. Without `--include-identity`, it copies only the
+confirmed addresses each account's included messages use, including addresses
+in the stored headers of mail not yet attributed, so each message keeps its
+account. The optional identity, attribute, profile, and vCard flags can copy
+personal records that have no message in the subset; read the command's
+warning before sharing its output.
 
 ---
 
@@ -2360,7 +2477,7 @@ grant consent to a provider or enroll a person in briefs.
 | `person provider check [name]` | Run fixed synthetic input without granting consent |
 | `person provider consent [name] --yes` | Grant consent to the exact checked policy |
 | `person provider revoke [name]` | Revoke that policy's consent; `--all` revokes all stored sweep policies |
-| `person provider remove <name>` | Remove a configured profile |
+| `person provider remove <name>` | Remove a configured profile and its stored key. For a profile no longer in the config, delete its leftover stored key and revoke consent for the policies that used it |
 | `person provider history [name] [--person <id>]` | Inspect redacted runs and attempts |
 | `person sweep run [--person <id>] [--limit 25]` | Run a bounded maintenance pass for tracked people |
 | `person sweep status` | Read redacted progress and usage |
@@ -2478,7 +2595,9 @@ book; see the [CardDAV guide](/docs/usage/people-carddav/).
 |---|---|
 | `add-carddav <base-url> <username> [--connection <name>] [--schedule <cron>] [--disabled]` | Discover and save an account; password is prompted or read from piped stdin |
 | `add-carddav --google <email> [--connection <name>] [--oauth-app <name>] [--schedule <cron>] [--disabled]` | Connect Google Contacts using an authorized account token |
+| `add-carddav --microsoft <email> [--headless] [--connection <name>] [--schedule <cron>] [--disabled]` | Sign in to Microsoft and connect Microsoft 365 or Outlook.com contacts through Microsoft Graph |
 | `carddav authorize-google <email> [--oauth-app <name>] [--no-browser]` | Authorize Google Contacts in the browser, preserving existing Google permissions |
+| `carddav authorize-microsoft <email> [--headless]` | Sign in to Microsoft for contacts without saving a connection |
 | `sync-carddav [--connection <name>] [--full]` | Synchronize all enabled connections, or the selected connection; `--full` reconciles complete books |
 | `carddav connections` | List connection names, enablement, runtime availability and orphaned accounts |
 | `person publish <person-id>` / `person unpublish <person-id>` | Publish a saved profile or remove its remote card |
@@ -2562,6 +2681,7 @@ msgvault person promote <participant-id>
 msgvault person list [--json]
 msgvault person directory [flags]
 msgvault person get <person-id> [--json]
+msgvault person identities <person-id> [--json]
 msgvault person set-display-name <person-id> <display-name> [--json]
 msgvault person set-display-name <person-id> --clear [--json]
 msgvault person delete <person-id>
@@ -2583,6 +2703,16 @@ including an edited or cleared value. `set-display-name` preserves the
 profile's stable ID and vCard UID. `delete` permanently retires that UID and
 removes the profile's participant bindings. A person with active merge lineage
 cannot be deleted until that lineage is fully split.
+
+`identities` lists the email addresses, phone numbers, and chat identifiers
+that the person's current participants have used in your archive, so a merge or
+split shows up on the next call. Email addresses are `supported` draft
+recipients: pass one to [`draft-compose --to`](#draft-to-a-person). A listed
+value keeps the quotes that a local part such as `"first last"` needs. Phone
+numbers and chat identifiers are `unsupported`. Curated contact points and
+postal addresses are not listed. An unknown or merged-away person fails with
+`Person profile not found`. Only the owner can list identities; delegated agent
+tokens are refused. The listing does not wait for a running sync or import.
 
 `merge` keeps the survivor's ID and vCard UID, moves the absorbed profile into
 it, and records a reversible merge packet. Profiles with active CardDAV
@@ -2674,6 +2804,27 @@ UID and aliases. JSON includes `truncated` when more items remain; use Kata to
 view the rest. Oversized Kata responses produce an explicit error. See the
 [Kata configuration](configuration.md#integrationskata) for metadata and
 response limits.
+
+---
+
+## kata
+
+Create Kata issues that quote exact message or file text. Configure
+[`[integrations.kata]`](configuration.md#integrationskata) on the daemon first.
+
+```bash
+msgvault kata evidence prepare [--input FILE]
+msgvault kata create --idempotency-key KEY [--input FILE] [--json]
+msgvault kata link <ref> [--input FILE] [--json]
+```
+
+Each command reads one JSON request from `--input`, or stdin by default.
+`prepare` prints exact excerpts and the references that `create` and `link`
+accept. `create` requires `--idempotency-key`, a key you choose to name the
+issue; running it again with the same key and input returns the issue it filed
+instead of a duplicate.
+`link` adds evidence to an existing issue in the configured project, given
+as `project#ref` or a bare ref. See [Kata issues](usage/kata-issues.md) for request shapes and limits.
 
 ---
 
@@ -3428,8 +3579,9 @@ msgvault mcp [flags]
 | `--http-token-file` | — | On unreleased `main`, read an independent inbound bearer key from an owner-only file; takes priority over `--http-token-env`. Requires `--http`. |
 | `--http-token-env` | — | On unreleased `main`, name the environment variable holding an independent inbound bearer key. Requires `--http`. |
 | `--http-allow-insecure` | `false` | Allow non-loopback HTTP binding without an effective inbound key. A configured key is still enforced; without one, use only behind a trusted network boundary or authenticated reverse proxy. |
-| `--http-allow-writes` | `false` | Expose Saved View management, attachment export, deletion staging, and managed draft writes over StreamableHTTP. Calendar event mutations also require `--allow-calendar-writes`. Enable only for trusted, authenticated clients. |
+| `--http-allow-writes` | `false` | Expose Saved View management, attachment export, deletion staging, and managed draft writes over StreamableHTTP. Calendar event mutations also require `--allow-calendar-writes`, and Kata issue writes `--allow-kata-writes`. Enable only for trusted, authenticated clients. |
 | `--allow-calendar-writes` | `false` | Expose calendar event mutation tools. HTTP also requires `--http-allow-writes`; only enable for sessions where the user explicitly authorizes calendar writes. |
+| `--allow-kata-writes` | `false` | Expose `create_kata_issue` and `link_kata_evidence`. HTTP also requires `--http-allow-writes`; archive text is untrusted input, so only enable for sessions where the user explicitly authorizes Kata issue writes. See [Kata issues](usage/kata-issues.md). |
 
 See [MCP Server](/docs/usage/chat/) for configuration and tool reference.
 
@@ -3898,6 +4050,27 @@ msgvault repair-message 123 --source-id 42
 | `--json` | Emit newline-delimited audit results; requires `--audit` |
 
 Without `--audit`, supply exactly one internal numeric message ID or Gmail ID.
+Repair fetches a fresh Gmail snapshot and replaces that message's stored MIME,
+headers, bodies, recipients, labels, and MIME attachment rows. It preserves the
+internal message ID and provider-owned attachments.
+
+The audit parses stored raw MIME and compares it with the archived fields on
+every run. It does not contact Gmail, change the archive, or read saved mismatch
+flags. Coherent messages are omitted. After a successful repair, run the same
+audit again to confirm the message is omitted; no re-sync or cache rebuild is
+needed. When stored part keys are available, attachments are compared by
+physical MIME occurrence, so separate parts with identical bytes still count
+separately. Older rows without part keys cannot prove how many times identical
+content occurred.
+
+An `inconclusive` raw MIME result means the stored MIME is missing, cannot be
+decoded or parsed, or exceeds the audit's 64 MiB decompression limit. Repair
+fetches fresh MIME from Gmail and requires it to parse successfully. If fetching,
+parsing, publishing attachment bytes, or replacing the snapshot fails, the stored
+snapshot stays unchanged. A later cache-refresh error can occur after the
+snapshot has been committed; re-audit to check that snapshot. If a message
+remains flagged after a successful repair, retain the new audit result and the
+repair's error output for diagnosis.
 
 ## repair-derived
 
@@ -3910,10 +4083,14 @@ msgvault repair-derived
 msgvault repair-derived --source-type beeper
 ```
 
-Repeat `--source-type` or `--identifier` to narrow the source set. Only source
-types with a registered re-derivation pass are supported; an unknown requested
-type is an error. Source syncs also run pending re-derivation passes, so use this
-command for on-demand repair or retrying an interrupted pass.
+Repeat `--source-type` or `--identifier` to narrow the source set. A requested
+type that has no re-derivation pass and no source in the archive is an error.
+Source types with a re-derivation pass (`beeper`, `discord`) recompute their
+derived text and metadata. Every source also derives account attribution for
+email and calendar rows still pending it, so `received:` and `account:` find
+them. Source syncs and imports run the same work first, so use this command
+for on-demand repair, file imports you will not run again, or retrying an
+interrupted pass.
 
 ## gc
 

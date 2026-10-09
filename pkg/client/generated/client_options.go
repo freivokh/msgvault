@@ -5159,6 +5159,156 @@ func (o *GetImportJobRequestOptions) GetHeader() (map[string]string, error) {
 	return nil, nil
 }
 
+// PrepareKataEvidenceRequestOptions is the options needed to make a request to PrepareKataEvidence.
+type PrepareKataEvidenceRequestOptions struct {
+	Body *PrepareKataEvidenceBody
+}
+
+// Validate validates all the fields in the options.
+// Use it if fields validation was not run.
+func (o *PrepareKataEvidenceRequestOptions) Validate() error {
+	var errors runtime.ValidationErrors
+
+	if o.Body != nil {
+		if v, ok := any(o.Body).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("Body", err)
+			}
+		}
+	}
+	if len(errors) == 0 {
+		return nil
+	}
+
+	return errors
+}
+
+// GetPathParams returns the path params as a map.
+func (o *PrepareKataEvidenceRequestOptions) GetPathParams() (map[string]any, error) {
+	return nil, nil
+}
+
+// GetQuery returns the query params as a map.
+func (o *PrepareKataEvidenceRequestOptions) GetQuery() (map[string]any, error) {
+	return nil, nil
+}
+
+// GetBody returns the payload in any type that can be marshalled to JSON by the client.
+func (o *PrepareKataEvidenceRequestOptions) GetBody() any {
+	return o.Body
+}
+
+// GetHeader returns the headers as a map.
+func (o *PrepareKataEvidenceRequestOptions) GetHeader() (map[string]string, error) {
+	return nil, nil
+}
+
+// CreateKataIssueRequestOptions is the options needed to make a request to CreateKataIssue.
+type CreateKataIssueRequestOptions struct {
+	Body   *CreateKataIssueBody
+	Header *CreateKataIssueHeaders
+}
+
+// Validate validates all the fields in the options.
+// Use it if fields validation was not run.
+func (o *CreateKataIssueRequestOptions) Validate() error {
+	var errors runtime.ValidationErrors
+
+	if o.Body != nil {
+		if v, ok := any(o.Body).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("Body", err)
+			}
+		}
+	}
+
+	if o.Header != nil {
+		if v, ok := any(o.Header).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("Header", err)
+			}
+		}
+	}
+	if len(errors) == 0 {
+		return nil
+	}
+
+	return errors
+}
+
+// GetPathParams returns the path params as a map.
+func (o *CreateKataIssueRequestOptions) GetPathParams() (map[string]any, error) {
+	return nil, nil
+}
+
+// GetQuery returns the query params as a map.
+func (o *CreateKataIssueRequestOptions) GetQuery() (map[string]any, error) {
+	return nil, nil
+}
+
+// GetBody returns the payload in any type that can be marshalled to JSON by the client.
+func (o *CreateKataIssueRequestOptions) GetBody() any {
+	return o.Body
+}
+
+// GetHeader returns the headers as a map.
+func (o *CreateKataIssueRequestOptions) GetHeader() (map[string]string, error) {
+	return runtime.AsMap[string](o.Header)
+}
+
+// LinkKataEvidenceRequestOptions is the options needed to make a request to LinkKataEvidence.
+type LinkKataEvidenceRequestOptions struct {
+	PathParams *LinkKataEvidencePath
+	Body       *LinkKataEvidenceBody
+}
+
+// Validate validates all the fields in the options.
+// Use it if fields validation was not run.
+func (o *LinkKataEvidenceRequestOptions) Validate() error {
+	var errors runtime.ValidationErrors
+
+	if o.PathParams != nil {
+		if v, ok := any(o.PathParams).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("PathParams", err)
+			}
+		}
+	}
+
+	if o.Body != nil {
+		if v, ok := any(o.Body).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("Body", err)
+			}
+		}
+	}
+	if len(errors) == 0 {
+		return nil
+	}
+
+	return errors
+}
+
+// GetPathParams returns the path params as a map.
+func (o *LinkKataEvidenceRequestOptions) GetPathParams() (map[string]any, error) {
+	return runtime.AsMap[any](o.PathParams)
+}
+
+// GetQuery returns the query params as a map.
+func (o *LinkKataEvidenceRequestOptions) GetQuery() (map[string]any, error) {
+	return nil, nil
+}
+
+// GetBody returns the payload in any type that can be marshalled to JSON by the client.
+func (o *LinkKataEvidenceRequestOptions) GetBody() any {
+	return o.Body
+}
+
+// GetHeader returns the headers as a map.
+func (o *LinkKataEvidenceRequestOptions) GetHeader() (map[string]string, error) {
+	return nil, nil
+}
+
 // SearchIntegrationTasksRequestOptions is the options needed to make a request to SearchIntegrationTasks.
 type SearchIntegrationTasksRequestOptions struct {
 	Query *SearchIntegrationTasksQuery
@@ -5200,6 +5350,50 @@ func (o *SearchIntegrationTasksRequestOptions) GetBody() any {
 
 // GetHeader returns the headers as a map.
 func (o *SearchIntegrationTasksRequestOptions) GetHeader() (map[string]string, error) {
+	return nil, nil
+}
+
+// SearchMediaRequestOptions is the options needed to make a request to SearchMedia.
+type SearchMediaRequestOptions struct {
+	Query *SearchMediaQuery
+}
+
+// Validate validates all the fields in the options.
+// Use it if fields validation was not run.
+func (o *SearchMediaRequestOptions) Validate() error {
+	var errors runtime.ValidationErrors
+
+	if o.Query != nil {
+		if v, ok := any(o.Query).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("Query", err)
+			}
+		}
+	}
+	if len(errors) == 0 {
+		return nil
+	}
+
+	return errors
+}
+
+// GetPathParams returns the path params as a map.
+func (o *SearchMediaRequestOptions) GetPathParams() (map[string]any, error) {
+	return nil, nil
+}
+
+// GetQuery returns the query params as a map.
+func (o *SearchMediaRequestOptions) GetQuery() (map[string]any, error) {
+	return runtime.AsMap[any](o.Query)
+}
+
+// GetBody returns the payload in any type that can be marshalled to JSON by the client.
+func (o *SearchMediaRequestOptions) GetBody() any {
+	return nil
+}
+
+// GetHeader returns the headers as a map.
+func (o *SearchMediaRequestOptions) GetHeader() (map[string]string, error) {
 	return nil, nil
 }
 
@@ -5605,6 +5799,50 @@ func (o *GetMessageInlinePartRequestOptions) GetBody() any {
 
 // GetHeader returns the headers as a map.
 func (o *GetMessageInlinePartRequestOptions) GetHeader() (map[string]string, error) {
+	return nil, nil
+}
+
+// ListMessageRecordingsRequestOptions is the options needed to make a request to ListMessageRecordings.
+type ListMessageRecordingsRequestOptions struct {
+	PathParams *ListMessageRecordingsPath
+}
+
+// Validate validates all the fields in the options.
+// Use it if fields validation was not run.
+func (o *ListMessageRecordingsRequestOptions) Validate() error {
+	var errors runtime.ValidationErrors
+
+	if o.PathParams != nil {
+		if v, ok := any(o.PathParams).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("PathParams", err)
+			}
+		}
+	}
+	if len(errors) == 0 {
+		return nil
+	}
+
+	return errors
+}
+
+// GetPathParams returns the path params as a map.
+func (o *ListMessageRecordingsRequestOptions) GetPathParams() (map[string]any, error) {
+	return runtime.AsMap[any](o.PathParams)
+}
+
+// GetQuery returns the query params as a map.
+func (o *ListMessageRecordingsRequestOptions) GetQuery() (map[string]any, error) {
+	return nil, nil
+}
+
+// GetBody returns the payload in any type that can be marshalled to JSON by the client.
+func (o *ListMessageRecordingsRequestOptions) GetBody() any {
+	return nil
+}
+
+// GetHeader returns the headers as a map.
+func (o *ListMessageRecordingsRequestOptions) GetHeader() (map[string]string, error) {
 	return nil, nil
 }
 
@@ -8552,6 +8790,50 @@ func (o *SearchPersonFilesRequestOptions) GetBody() any {
 
 // GetHeader returns the headers as a map.
 func (o *SearchPersonFilesRequestOptions) GetHeader() (map[string]string, error) {
+	return nil, nil
+}
+
+// ListPersonIdentitiesRequestOptions is the options needed to make a request to ListPersonIdentities.
+type ListPersonIdentitiesRequestOptions struct {
+	PathParams *ListPersonIdentitiesPath
+}
+
+// Validate validates all the fields in the options.
+// Use it if fields validation was not run.
+func (o *ListPersonIdentitiesRequestOptions) Validate() error {
+	var errors runtime.ValidationErrors
+
+	if o.PathParams != nil {
+		if v, ok := any(o.PathParams).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("PathParams", err)
+			}
+		}
+	}
+	if len(errors) == 0 {
+		return nil
+	}
+
+	return errors
+}
+
+// GetPathParams returns the path params as a map.
+func (o *ListPersonIdentitiesRequestOptions) GetPathParams() (map[string]any, error) {
+	return runtime.AsMap[any](o.PathParams)
+}
+
+// GetQuery returns the query params as a map.
+func (o *ListPersonIdentitiesRequestOptions) GetQuery() (map[string]any, error) {
+	return nil, nil
+}
+
+// GetBody returns the payload in any type that can be marshalled to JSON by the client.
+func (o *ListPersonIdentitiesRequestOptions) GetBody() any {
+	return nil
+}
+
+// GetHeader returns the headers as a map.
+func (o *ListPersonIdentitiesRequestOptions) GetHeader() (map[string]string, error) {
 	return nil, nil
 }
 
@@ -11800,6 +12082,50 @@ func (o *TriggerSyncRequestOptions) GetBody() any {
 
 // GetHeader returns the headers as a map.
 func (o *TriggerSyncRequestOptions) GetHeader() (map[string]string, error) {
+	return nil, nil
+}
+
+// CaptureTelemetryEventRequestOptions is the options needed to make a request to CaptureTelemetryEvent.
+type CaptureTelemetryEventRequestOptions struct {
+	Body *CaptureTelemetryEventBody
+}
+
+// Validate validates all the fields in the options.
+// Use it if fields validation was not run.
+func (o *CaptureTelemetryEventRequestOptions) Validate() error {
+	var errors runtime.ValidationErrors
+
+	if o.Body != nil {
+		if v, ok := any(o.Body).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("Body", err)
+			}
+		}
+	}
+	if len(errors) == 0 {
+		return nil
+	}
+
+	return errors
+}
+
+// GetPathParams returns the path params as a map.
+func (o *CaptureTelemetryEventRequestOptions) GetPathParams() (map[string]any, error) {
+	return nil, nil
+}
+
+// GetQuery returns the query params as a map.
+func (o *CaptureTelemetryEventRequestOptions) GetQuery() (map[string]any, error) {
+	return nil, nil
+}
+
+// GetBody returns the payload in any type that can be marshalled to JSON by the client.
+func (o *CaptureTelemetryEventRequestOptions) GetBody() any {
+	return o.Body
+}
+
+// GetHeader returns the headers as a map.
+func (o *CaptureTelemetryEventRequestOptions) GetHeader() (map[string]string, error) {
 	return nil, nil
 }
 

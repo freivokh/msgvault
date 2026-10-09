@@ -124,26 +124,30 @@ Use `testing/synctest` bubbles for work owned by the test process, including
 goroutines, channels, timers, tickers, and fakes. Advance virtual time with
 `synctest.Sleep` and wait for durable state with `synctest.Wait`.
 
-Keep real budgets for PostgreSQL and SQLite locks, database clocks, network
-requests, subprocesses, DuckDB, and operating-system events. Name retained
-sub-second testify budgets so their event and owner are clear.
-
-The helper check rejects bare totals below one second in `Eventually`,
-`Eventuallyf`, `EventuallyWithT`, `EventuallyWithTf`, `Never`, and `Neverf`.
-Named budgets and variables stay outside this rule. Virtual sleeps are valid
-inside a bubble. CI runs this check on Ubuntu, so Windows-only test files still
-need Windows validation.
+Keep real waits for PostgreSQL and SQLite locks, database clocks, network
+requests, subprocesses, DuckDB, and operating-system events.
 
 `make lint` and `make lint-ci` build a pinned golangci-lint with Kit's
-`kennlint` plugin and run its `sleeptest` check. The check rejects `time.Sleep`
-in tests outside a `synctest.Test` bubble. A kept real wait carries
-`//nolint:kennlint // <what it waits for>` on the sleep line.
+`kennlint` plugin and run its `sleeptest` and `deadlinetest` checks. Outside a
+`synctest.Test` bubble, `sleeptest` rejects `time.Sleep` and `deadlinetest`
+rejects sub-second `context.WithTimeout`, `context.WithDeadline`, `time.After`,
+`time.NewTimer`, `time.AfterFunc` and testify `Eventually` budgets, plus zero
+or negative `Never` windows. A kept real wait carries `//nolint:kennlint //
+<what it waits for>` on the flagged line; for a deadline, that is only when its
+expiry is the asserted result or a `select` shows an event does not happen.
 
 ### PostgreSQL tests
 
 `MSGVAULT_TEST_DB=postgres://...` runs PostgreSQL-backed
 tests. pgvector tests require a PostgreSQL instance with the `vector`
 extension and the `pgvector` build tag.
+
+`MSGVAULT_TEST_DB=postgres://... make test-pg-nocgo` checks the PostgreSQL-only
+library profile. It builds the store, query engine, Slack and Discord importers,
+and HTTP API with `CGO_ENABLED=0`, then tests archive writes, full-text search,
+and reads against PostgreSQL. It deliberately omits the `fts5` and `sqlite_vec`
+build tags. SQLite archives, local SQLite imports, and DuckDB/Parquet analytics
+require the normal CGO build; this profile does not build the standalone CLI.
 
 The PostgreSQL deadlock tests also require permission to set
 `deadlock_timeout`. They defer the blocker transaction's deadlock detector
