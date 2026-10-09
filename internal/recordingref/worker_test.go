@@ -961,6 +961,8 @@ func TestRecordingReferenceCorrectionDuringHTTP(t *testing.T) {
 			f := storetest.New(t)
 			id := f.CreateMessage("original")
 			recordingBody(t, f, id, "https://loom.com/share/abc")
+			_, err := f.Store.DB().Exec(f.Store.Rebind(`UPDATE messages SET content_changed_at='2000-01-01 00:00:00.000' WHERE id=?`), id)
+			require.NoError(err)
 			requests := make(chan docbankmedia.ReferenceRequest, 5)
 			release := make(chan struct{})
 			var releaseOnce sync.Once
@@ -991,19 +993,7 @@ func TestRecordingReferenceCorrectionDuringHTTP(t *testing.T) {
 			worker := NewWorker(f.Store, client, "destination", nil, nil).WithOperationGate(gate)
 			done := make(chan error, 1)
 			go func() {
-				for {
-					err := worker.RunBatch(t.Context())
-					if err != nil || posts.Load() > 0 {
-						done <- err
-						return
-					}
-					select {
-					case <-time.After(10 * time.Millisecond):
-					case <-t.Context().Done():
-						done <- t.Context().Err()
-						return
-					}
-				}
+				done <- worker.RunBatch(t.Context())
 			}()
 			var original docbankmedia.ReferenceRequest
 			select {
@@ -1012,7 +1002,7 @@ func TestRecordingReferenceCorrectionDuringHTTP(t *testing.T) {
 				require.FailNow("request did not reach HTTP")
 			}
 			mu.Lock()
-			_, err := f.Store.DB().Exec(f.Store.Rebind(`UPDATE messages SET source_message_id=? WHERE id=?`), "corrected", id)
+			_, err = f.Store.DB().Exec(f.Store.Rebind(`UPDATE messages SET source_message_id=? WHERE id=?`), "corrected", id)
 			mu.Unlock()
 			require.NoError(err)
 			discovery := NewWorker(f.Store, client, "destination", nil, nil).WithOperationGate(gate)
