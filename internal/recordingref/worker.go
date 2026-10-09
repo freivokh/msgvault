@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"go.kenn.io/msgvault/internal/docbankmedia"
+	"go.kenn.io/msgvault/internal/mime"
 	"go.kenn.io/msgvault/internal/store"
 )
 
@@ -59,8 +60,9 @@ func messageRefs(m store.RecordingMessage, origins []string) []Ref {
 	for _, r := range anchors {
 		exact[r.Reference] = true
 	}
+	prose := m.Body + "\n" + mime.StripHTML(m.BodyHTML)
 	// Exact anchor targets take precedence over prose punctuation heuristics.
-	for _, r := range append(anchors, scanProse(m.Body, origins, exact)...) {
+	for _, r := range append(anchors, scanProse(prose, origins, exact)...) {
 		if !seen[r.RouteKey] {
 			refs = append(refs, r)
 			seen[r.RouteKey] = true
@@ -107,51 +109,58 @@ func (w *Worker) RunBatch(ctx context.Context) error {
 	start := time.Now()
 	policy := digest(strings.Join(w.origins, "\x00"))
 	for pages < 50 && time.Since(start) < 20*time.Second {
-		more := false
-		err := w.gated(ctx, func() error {
-			before, err := w.st.LoadRecordingReferenceCursor(ctx, w.destination)
+		var before, cursor store.RecordingReferenceCursor
+		var page store.ChangedMessagePage
+		if err := w.gated(ctx, func() error {
+			var err error
+			before, err = w.st.LoadRecordingReferenceCursor(ctx, w.destination)
 			if err != nil {
 				return err
 			}
-			cursor := before
+			cursor = before
 			if cursor.Policy != policy {
 				cursor = store.RecordingReferenceCursor{Policy: policy}
 			}
-			page, err := w.st.ListChangedMessages(ctx, cursor.FeedCursor(), 200)
-			if err != nil {
-				return err
+			page, err = w.st.ListChangedMessages(ctx, cursor.FeedCursor(), 200)
+			return err
+		}); err != nil {
+			return err
+		}
+		complete := true
+		for _, changed := range page.Messages {
+			if time.Since(start) >= 20*time.Second {
+				complete = false
+				break
 			}
-			for _, changed := range page.Messages {
+			if err := w.gated(ctx, func() error {
 				m, exists, err := w.st.ReadRecordingMessage(ctx, changed.ID)
 				if err != nil {
 					return err
 				}
 				if exists {
-					if err := w.reconcile(ctx, m); err != nil {
-						return err
-					}
+					return w.reconcile(ctx, m)
 				}
-				examined++
-				cursor.At, cursor.AfterID, cursor.AfterRow = changed.ContentChangedAt, changed.ID, true
-			}
-			more = len(page.Messages) == 200
-			if !more && !page.CompleteThrough.IsZero() {
-				cursor.At, cursor.AfterID, cursor.AfterRow = page.CompleteThrough, 0, false
-			}
-			swapped, err := w.st.AdvanceRecordingReferenceCursor(ctx, w.destination, before, cursor)
-			if err != nil {
+				return nil
+			}); err != nil {
 				return err
 			}
-			if !swapped {
-				more = false
-			}
-			return nil
-		})
-		if err != nil {
+			examined++
+			cursor.At, cursor.AfterID, cursor.AfterRow = changed.ContentChangedAt, changed.ID, true
+		}
+		more := complete && len(page.Messages) == 200
+		if complete && !more && !page.CompleteThrough.IsZero() {
+			cursor.At, cursor.AfterID, cursor.AfterRow = page.CompleteThrough, 0, false
+		}
+		var swapped bool
+		if err := w.gated(ctx, func() error {
+			var err error
+			swapped, err = w.st.AdvanceRecordingReferenceCursor(ctx, w.destination, before, cursor)
+			return err
+		}); err != nil {
 			return err
 		}
 		pages++
-		if !more {
+		if !more || !swapped {
 			break
 		}
 	}
