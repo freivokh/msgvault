@@ -23,18 +23,15 @@ type handleCall struct {
 func stubLinuxIdentitySyscalls(
 	t *testing.T,
 	handle func(dirfd int, path string, flags int) (unix.FileHandle, int, error),
-) *[]int {
+) {
 	t.Helper()
 	statx, nameToHandleAt := linuxStatx, linuxNameToHandleAt
 	t.Cleanup(func() { linuxStatx, linuxNameToHandleAt = statx, nameToHandleAt })
-	var statxFlags []int
-	linuxStatx = func(_ int, _ string, flags int, _ int, stat *unix.Statx_t) error {
-		statxFlags = append(statxFlags, flags)
+	linuxStatx = func(_ int, _ string, _ int, _ int, stat *unix.Statx_t) error {
 		*stat = unix.Statx_t{Mask: unix.STATX_INO, Dev_major: 8, Dev_minor: 1, Ino: 42}
 		return nil
 	}
 	linuxNameToHandleAt = handle
-	return &statxFlags
 }
 
 func TestLinuxFileIdentityWithoutBirthTimeUsesFileHandle(t *testing.T) {
@@ -93,35 +90,6 @@ func TestLinuxFileIdentityWithoutBirthTimeHandleErrorPolicy(t *testing.T) {
 			assert.Empty(t, identity)
 		})
 	}
-}
-
-func TestLinuxFileIdentityDoesNotFollowFinalSymlink(t *testing.T) {
-	require := require.New(t)
-	assert := assert.New(t)
-	var calls []handleCall
-	statxFlags := stubLinuxIdentitySyscalls(t, func(dirfd int, path string, flags int) (unix.FileHandle, int, error) {
-		calls = append(calls, handleCall{dirfd: dirfd, path: path, flags: flags})
-		return unix.NewFileHandle(1, []byte{1}), 0, nil
-	})
-	file, err := os.Open(t.TempDir())
-	require.NoError(err)
-	t.Cleanup(func() { _ = file.Close() })
-
-	_, ok := openedUnixFileIdentity(file, nil)
-	require.True(ok)
-	_, ok = pathEntryIdentity("/config/link.toml", nil)
-	require.True(ok)
-
-	require.Len(*statxFlags, 2)
-	assert.NotZero((*statxFlags)[0] & unix.AT_EMPTY_PATH)
-	assert.NotZero((*statxFlags)[0] & unix.AT_SYMLINK_NOFOLLOW)
-	assert.Zero((*statxFlags)[1] & unix.AT_EMPTY_PATH)
-	assert.NotZero((*statxFlags)[1] & unix.AT_SYMLINK_NOFOLLOW)
-	// name_to_handle_at follows a final symlink only with AT_SYMLINK_FOLLOW.
-	assert.Equal([]handleCall{
-		{dirfd: int(file.Fd()), path: "", flags: unix.AT_EMPTY_PATH},
-		{dirfd: unix.AT_FDCWD, path: "/config/link.toml", flags: 0},
-	}, calls)
 }
 
 func TestLinuxFileIdentityWithBirthTimeSkipsFileHandle(t *testing.T) {
@@ -202,6 +170,43 @@ func TestConfigIdentityWithoutBirthTime(t *testing.T) {
 			require.NoError(os.Remove(path))
 			require.NoError(os.WriteFile(path, []byte("[web]\ntheme = \"system\"\n"), 0o600))
 			assert.NotEqual(t, first, mustConfigIdentity(t, path))
+		})
+	}
+}
+
+func TestLinuxFileIdentityWithoutBirthTimeDoesNotFollowFinalSymlink(t *testing.T) {
+	for _, mode := range noBirthTimeModes {
+		t.Run(mode.name, func(t *testing.T) {
+			withoutBirthTime(t, mode.fileHandles)
+			require := require.New(t)
+			dir := t.TempDir()
+			target := filepath.Join(dir, "config.toml")
+			require.NoError(os.WriteFile(target, []byte("[web]\ntheme = \"system\"\n"), 0o600))
+			link := filepath.Join(dir, "link.toml")
+			require.NoError(os.Symlink(target, link))
+
+			targetIdentity, ok := pathEntryIdentity(target, nil)
+			require.True(ok)
+			linkIdentity, ok := pathEntryIdentity(link, nil)
+			require.True(ok)
+			assert.NotEqual(t, targetIdentity, linkIdentity)
+
+			// An opened descriptor names the same object as its path. The
+			// resolver opens symlinks with O_PATH|O_NOFOLLOW, so cover that too.
+			file, err := os.Open(target)
+			require.NoError(err)
+			t.Cleanup(func() { _ = file.Close() })
+			openedTarget, ok := openedUnixFileIdentity(file, nil)
+			require.True(ok)
+			assert.Equal(t, targetIdentity, openedTarget)
+
+			fd, err := unix.Open(link, unix.O_PATH|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0)
+			require.NoError(err)
+			linkFile := os.NewFile(uintptr(fd), link)
+			t.Cleanup(func() { _ = linkFile.Close() })
+			openedLink, ok := openedUnixFileIdentity(linkFile, nil)
+			require.True(ok)
+			assert.Equal(t, linkIdentity, openedLink)
 		})
 	}
 }
